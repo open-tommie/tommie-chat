@@ -1,0 +1,23 @@
+{
+  "name": "babylon-mmo-sample",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "ktx2": "basisu your-image.png -ktx2 -mipmap -q 255",
+    "dev": "vite",
+    "check": "tsc --noEmit",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@babylonjs/core": "^8.53.0",
+    "@babylonjs/gui": "^8.53.0",
+    "@babylonjs/loaders": "^8.53.0",
+    "@babylonjs/materials": "^8.53.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0"
+  }
+}
