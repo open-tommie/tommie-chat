@@ -2,10 +2,12 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>24-mmo-Tommie-chat</title>
+    <title>tommie-chat</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #87ceeb; }
-        canvas { width: 100vw; height: 100vh; display: block; touch-action: none; }
+        canvas { width: 100vw; height: 100vh; display: block; touch-action: none;
+            /* image-rendering: pixelated; */
+        }
         
         #chat-container {
             position: fixed;
@@ -20,9 +22,9 @@
         }
         #chatInput {
             flex-grow: 1;
-            height: 60px;
-            font-size: 18px;
-            padding: 10px;
+            height: 40px;
+            font-size: 16px;
+            padding: 5px;
             border-radius: 8px;
             border: 2px solid #555;
             background: rgba(255, 255, 255, 0.9);
@@ -37,8 +39,8 @@
             font-weight: bold;
             font-size: 16px;
         }
-        #sendBtn { background: #0078d7; }
-        #clearBtn { background: #d70000; }
+        #sendBtn { background: #0076d752; }
+        #clearBtn { background: #d7000034; }
     </style>
 </head>
 <body>

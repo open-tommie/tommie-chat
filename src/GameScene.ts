@@ -14,9 +14,11 @@ import {
     Texture,
     TransformNode,
     SceneInstrumentation,
-    PointerEventTypes
+    EngineInstrumentation,
+    PointerEventTypes,
+    DefaultRenderingPipeline 
 } from "@babylonjs/core";
-import { AdvancedDynamicTexture, TextBlock, Rectangle, Control, Grid } from "@babylonjs/gui";
+import { AdvancedDynamicTexture, TextBlock, Rectangle, Control, Grid, Button } from "@babylonjs/gui"; 
 import "@babylonjs/loaders";
 import { GridMaterial } from "@babylonjs/materials";
 
@@ -34,10 +36,11 @@ export class GameScene {
 
     private updatePlayerSpeech!: (newText: string) => void;
 
+    private renderingPipeline!: DefaultRenderingPipeline;
+
     constructor(canvas: HTMLCanvasElement) {
         this.engine = new Engine(canvas, false);
-        const dpr = window.devicePixelRatio || 1.0;
-        this.engine.setHardwareScalingLevel(1 / dpr);
+        this.engine.setHardwareScalingLevel(1.0);
 
         this.scene = new Scene(this.engine);
 
@@ -73,6 +76,7 @@ export class GameScene {
         this.camera.upperRadiusLimit = 50;
         this.camera.fovMode = ArcRotateCamera.FOVMODE_VERTICAL_FIXED;
         this.camera.inertia = 0;
+        this.camera.maxZ = 2000;
 
         const light = new HemisphericLight("light", new Vector3(0, 1, 0), this.scene);
         light.intensity = 1.8;
@@ -80,6 +84,14 @@ export class GameScene {
 
         this.scene.clearColor = new Color4(0.53, 0.81, 0.98, 1.0);
         this.scene.ambientColor = new Color3(0.65, 0.65, 0.75);
+
+        this.renderingPipeline = new DefaultRenderingPipeline(
+            "defaultPipeline", 
+            false, 
+            this.scene, 
+            [this.camera]
+        );
+        this.renderingPipeline.samples = 1; 
     }
 
     private setupHtmlUI(): void {
@@ -131,9 +143,9 @@ export class GameScene {
         tex.hasAlpha = true;
         mat.albedoTexture = tex;
         mat.useAlphaFromAlbedoTexture = true;
-        mat.transparencyMode = PBRMaterial.PBR_ALPHABLEND;
+        
+        mat.transparencyMode = PBRMaterial.PBRMATERIAL_ALPHABLEND;
         mat.alphaMode = Engine.ALPHA_COMBINE;
-        mat.needAlphaTesting = true; 
         mat.metallic = 0.0;
         mat.roughness = 0.02;   
         mat.backFaceCulling = false;
@@ -142,24 +154,20 @@ export class GameScene {
         return avatarMesh;
     }
 
-    // アバターの真上に名前を表示するためのメソッド
     private createNameTag(targetMesh: Mesh, nameText: string): void {
-        const namePlane = MeshBuilder.CreatePlane("nameTag_" + targetMesh.name, { width: 1.5, height: 0.3 }, this.scene);
+        const namePlane = MeshBuilder.CreatePlane("nameTag_" + targetMesh.name, { width: 1.5, height: 0.40 }, this.scene);
         namePlane.billboardMode = Mesh.BILLBOARDMODE_ALL;
         namePlane.isPickable = false;
         
-        // 親子関係を設定してアバターに追従
         namePlane.parent = targetMesh;
-        // アバターの中心(0.75)より少し上に配置
         namePlane.position = new Vector3(0, 0.95, 0);
 
         const adt = AdvancedDynamicTexture.CreateForMesh(namePlane, 600, 120);
         const textBlock = new TextBlock();
         textBlock.text = nameText;
         textBlock.color = "white";
-        textBlock.fontSize = "48px";
+        textBlock.fontSize = "24px";
         textBlock.fontWeight = "bold";
-        // 背景なしでも見やすいように黒いアウトライン（縁取り）をつける
         textBlock.outlineWidth = 5;
         textBlock.outlineColor = "black";
         
@@ -196,14 +204,12 @@ export class GameScene {
         this.clickMarker.isVisible = false;
         this.clickMarker.isPickable = false;
 
-        // 指定された名前に変更
         this.playerBox = this.createAvatar("tommie.jp", "/textures/pic1.ktx2", 0, 0);
         const player2 = this.createAvatar("npc001", "/textures/pic2.ktx2", 0, 3);
         const player3 = this.createAvatar("npc002", "/textures/pic2.ktx2", 1.5, 3);
         const player4 = this.createAvatar("npc003", "/textures/pic2.ktx2", 3, 3);
 
-        // ネームタグの生成を追加
-        this.createNameTag(this.playerBox, "✅️tommie.jp🎖️");
+        this.createNameTag(this.playerBox, "tommie.jp✅️");
         this.createNameTag(player2, "npc001");
         this.createNameTag(player3, "npc002");
         this.createNameTag(player4, "npc003");
@@ -273,38 +279,35 @@ export class GameScene {
     }
 
     private createSpeechBubble(targetMesh: Mesh, speechText: string): (newText: string) => void {
-        // 3行分に合わせた高さ(0.45)に調整
-        const bubblePlane = MeshBuilder.CreatePlane("speechBubble_" + targetMesh.name, { width: 1.2, height: 0.45 }, this.scene);
+        const bubblePlane = MeshBuilder.CreatePlane("speechBubble_" + targetMesh.name, { width: 1.0, height: 0.20 }, this.scene);
         bubblePlane.billboardMode = Mesh.BILLBOARDMODE_ALL;
         bubblePlane.isPickable = false;
         
         bubblePlane.parent = targetMesh;
-        // ネームタグ(y=0.95)と重ならないように高さを引き上げ
-        bubblePlane.position = new Vector3(0, 1.5, 0); 
+        bubblePlane.position = new Vector3(0, 1.2, 0); 
         
-        // 縦横比に合わせてGUI解像度も変更（高さを225に）
-        const adt = AdvancedDynamicTexture.CreateForMesh(bubblePlane, 600, 225);
+        const adt = AdvancedDynamicTexture.CreateForMesh(bubblePlane, 600, 100);
         
         const bg = new Rectangle();
         bg.width = "100%"; bg.height = "100%";
         bg.cornerRadius = 20;
         bg.background = "rgba(255, 255, 255, 0.85)";
-        bg.thickness = 2;
+        bg.thickness = 1;
         bg.color = "#333333";
         adt.addControl(bg);
 
         const textBlock = new TextBlock();
         textBlock.text = speechText;
-        textBlock.fontSize = "32px";
+        textBlock.fontSize = "24px";
         textBlock.color = "black";
         
         textBlock.textWrapping = true;
         textBlock.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
         textBlock.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-        textBlock.paddingLeft = "20px";
-        textBlock.paddingRight = "20px";
-        textBlock.paddingTop = "15px";
-        textBlock.paddingBottom = "15px";
+        textBlock.paddingLeft = "10px";
+        textBlock.paddingRight = "10px";
+        textBlock.paddingTop = "10px";
+        textBlock.paddingBottom = "10px";
         
         bg.addControl(textBlock);
 
@@ -375,7 +378,9 @@ export class GameScene {
     private createDebugOverlay(): void {
         const adt = AdvancedDynamicTexture.CreateFullscreenUI("UI");
         const panel = new Rectangle();
-        panel.width = "170px"; panel.height = "160px";
+        
+        panel.width = "260px"; 
+        panel.height = "520px";
         panel.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
         panel.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
         panel.top = "15px"; panel.left = "-15px";
@@ -384,44 +389,207 @@ export class GameScene {
         adt.addControl(panel);
 
         const grid = new Grid();
-        grid.addColumnDefinition(0.4); grid.addColumnDefinition(0.6);
-        for(let i=0; i<5; i++) grid.addRowDefinition(0.20);
+        grid.addColumnDefinition(0.55); 
+        grid.addColumnDefinition(0.45);
+        
+        const numRows = 19;
+        for(let i = 0; i < numRows; i++) grid.addRowDefinition(1 / numRows);
         panel.addControl(grid);
 
         const createCell = (t: string, r: number, c: number, isl: boolean) => {
             const tb = new TextBlock();
-            tb.text = t; tb.color = isl ? "#AAAAAA" : "#00FF00";
-            tb.fontSize = 20; tb.fontFamily = "Courier New, monospace";
+            tb.text = t; 
+            tb.color = isl ? "#AAAAAA" : (t.includes("ms") ? "#FFA500" : "#00FF00");
+            tb.fontSize = 16; 
+            tb.fontFamily = "Courier New, monospace";
             tb.textHorizontalAlignment = isl ? Control.HORIZONTAL_ALIGNMENT_LEFT : Control.HORIZONTAL_ALIGNMENT_RIGHT;
-            tb.paddingLeft = isl ? "10px" : "0px"; tb.paddingRight = isl ? "0px" : "10px";
+            tb.paddingLeft = isl ? "10px" : "0px"; 
+            tb.paddingRight = isl ? "0px" : "10px";
             grid.addControl(tb, r, c);
             return tb;
         };
 
-        createCell("Ver", 0, 0, true);
-        createCell("FPS:", 1, 0, true); createCell("DRAW:", 2, 0, true);
-        createCell("MESH:", 3, 0, true); createCell("RAM:", 4, 0, true);
-        createCell("0.01", 0, 1, false);
-        const fv = createCell("0", 1, 1, false);
-        const dv = createCell("0", 2, 1, false);
-        const mv = createCell("0", 3, 1, false);
-        const rv = createCell("0.0 MB", 4, 1, false);
+        createCell("Scale:", 0, 0, true);  
+        createCell("Ver", 1, 0, true);
+        createCell("FPS:", 2, 0, true); 
+        createCell("CPU ms:", 3, 0, true);  
+        createCell("GPU ms:", 4, 0, true);  
+        createCell("DRAW:", 5, 0, true);
+        createCell("MESH:", 6, 0, true); 
+        createCell("Mats:", 7, 0, true);    
+        createCell("Bones:", 8, 0, true);   
+        createCell("JS RAM:", 9, 0, true);
+        createCell("TexRAM:", 10, 0, true); 
+        createCell("GeoRAM:", 11, 0, true); 
+        createCell("Indices:", 12, 0, true); 
+        createCell("Polys:", 13, 0, true);
+        createCell("LOD:", 14, 0, true); 
+        createCell("OcclQ:", 15, 0, true);
+        createCell("FarClip:", 16, 0, true); 
+        createCell("API:", 17, 0, true);
+        createCell("AntiAliasing:", 18, 0, true);
 
-        const instrumentation = new SceneInstrumentation(this.scene);
-        this.scene.onAfterRenderObservable.add(() => {
-            fv.text = this.engine.getFps().toFixed(0);
-            if (instrumentation && instrumentation.drawCallsCounter) {
-                dv.text = instrumentation.drawCallsCounter.current.toString();
+        const scaleBtn = Button.CreateSimpleButton("scaleBtn", "1.0");
+        scaleBtn.width = "60px";
+        scaleBtn.height = "22px";
+        scaleBtn.color = "#00FF00";
+        scaleBtn.background = "rgba(50, 50, 50, 0.8)";
+        scaleBtn.thickness = 1;
+        scaleBtn.cornerRadius = 4;
+        scaleBtn.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+        scaleBtn.paddingRight = "10px"; 
+        
+        if (scaleBtn.textBlock) {
+            scaleBtn.textBlock.fontSize = 14;
+            scaleBtn.textBlock.fontFamily = "Courier New, monospace";
+        }
+        grid.addControl(scaleBtn, 0, 1);
+
+        // ★ ご要望の通り選択肢を更新
+        const scaleLevels = [1.0, 2.0, 3.0, 0.5, 0.8];
+        let currentScaleIdx = 0;
+
+        scaleBtn.onPointerUpObservable.add(() => {
+            currentScaleIdx = (currentScaleIdx + 1) % scaleLevels.length;
+            const newScale = scaleLevels[currentScaleIdx];
+            this.engine.setHardwareScalingLevel(newScale);
+            
+            if (scaleBtn.textBlock) {
+                scaleBtn.textBlock.text = newScale.toFixed(1);
             }
-            mv.text = this.scene.getActiveMeshes().length.toString();
+        });
+
+        createCell("0.08", 1, 1, false);
+        const fv = createCell("0", 2, 1, false);
+        const cv = createCell("0.0", 3, 1, false);
+        const gv = createCell("0.0", 4, 1, false);
+        const dv = createCell("0", 5, 1, false);
+        const mv = createCell("0", 6, 1, false);
+        const matv = createCell("0", 7, 1, false);
+        const bv = createCell("0", 8, 1, false);
+        const rv = createCell("0.0 MB", 9, 1, false);
+        const tv = createCell("0.0 MB", 10, 1, false);
+        const geov = createCell("0.0 MB", 11, 1, false);
+        const iv = createCell("0", 12, 1, false);
+        const pv = createCell("0", 13, 1, false);
+        const lv = createCell("Off", 14, 1, false);
+        const ov = createCell("0", 15, 1, false);
+        const fcv = createCell("0", 16, 1, false);
+        
+        const isWebGPU = (this.engine as any).isWebGPU || this.engine.name === "WebGPU";
+        createCell(isWebGPU ? "WebGPU" : "WebGL2", 17, 1, false);
+        
+        const aaBtn = Button.CreateSimpleButton("aaBtn", "Off");
+        aaBtn.width = "60px";
+        aaBtn.height = "22px";
+        aaBtn.color = "#00FF00";
+        aaBtn.background = "rgba(50, 50, 50, 0.8)";
+        aaBtn.thickness = 1;
+        aaBtn.cornerRadius = 4;
+        aaBtn.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+        aaBtn.paddingRight = "10px"; 
+        
+        if (aaBtn.textBlock) {
+            aaBtn.textBlock.fontSize = 14;
+            aaBtn.textBlock.fontFamily = "Courier New, monospace";
+        }
+        grid.addControl(aaBtn, 18, 1); 
+
+        let isAAEnabled = false;
+        aaBtn.onPointerUpObservable.add(() => {
+            isAAEnabled = !isAAEnabled;
+            this.renderingPipeline.samples = isAAEnabled ? 4 : 1; 
+            
+            if (aaBtn.textBlock) {
+                aaBtn.textBlock.text = isAAEnabled ? "On" : "Off";
+                aaBtn.textBlock.color = isAAEnabled ? "#FFFFFF" : "#00FF00";
+            }
+            aaBtn.background = isAAEnabled ? "rgba(0, 120, 0, 0.8)" : "rgba(50, 50, 50, 0.8)";
+        });
+
+        const sceneInstrumentation = new SceneInstrumentation(this.scene);
+        sceneInstrumentation.captureFrameTime = true;
+        
+        const engineInstrumentation = new EngineInstrumentation(this.engine);
+        engineInstrumentation.captureGPUFrameTime = true;
+
+        let frameCount = 0;
+        let lastTexRAM = "0.0 MB";
+        let lastGeoRAM = "0.0 MB";
+
+        this.scene.onAfterRenderObservable.add(() => {
+            frameCount++;
+            
+            if (frameCount % 10 !== 0) return;
+
+            fv.text = this.engine.getFps().toFixed(0);
+            
+            if (sceneInstrumentation.frameTimeCounter) {
+                cv.text = sceneInstrumentation.frameTimeCounter.lastSecAverage.toFixed(2);
+            }
+            
+            if (engineInstrumentation.gpuFrameTimeCounter) {
+                const gpuTime = engineInstrumentation.gpuFrameTimeCounter.lastSecAverage;
+                gv.text = gpuTime > 0 ? gpuTime.toFixed(2) : "N/A"; 
+            }
+
+            if (sceneInstrumentation.drawCallsCounter) {
+                dv.text = sceneInstrumentation.drawCallsCounter.current.toString();
+            }
+            
+            const activeMeshes = this.scene.getActiveMeshes();
+            mv.text = activeMeshes.length.toString();
+            
+            const activeMaterials = new Set();
+            activeMeshes.forEach(m => { if(m.material) activeMaterials.add(m.material.name); });
+            matv.text = activeMaterials.size.toString();
+
+            let activeBones = 0;
+            activeMeshes.forEach(m => { if(m.skeleton) activeBones += m.skeleton.bones.length; });
+            bv.text = activeBones.toString();
+            
             const mem = (performance as any).memory;
             if (mem) rv.text = (mem.usedJSHeapSize / (1024 * 1024)).toFixed(1) + " MB";
+
+            if (frameCount % 60 === 0) { 
+                let textureMemoryBytes = 0;
+                this.scene.textures.forEach(texture => {
+                    const size = texture.getSize();
+                    if (size && size.width && size.height) {
+                        const multiplier = texture.noMipmap ? 1.0 : 1.33;
+                        textureMemoryBytes += size.width * size.height * 4 * multiplier;
+                    }
+                });
+                lastTexRAM = (textureMemoryBytes / (1024 * 1024)).toFixed(1) + " MB";
+                
+                let geoMemoryBytes = 0;
+                this.scene.meshes.forEach(m => {
+                    geoMemoryBytes += m.getTotalVertices() * 32;
+                    const indices = m.getIndices();
+                    if (indices) geoMemoryBytes += indices.length * 4;
+                });
+                lastGeoRAM = (geoMemoryBytes / (1024 * 1024)).toFixed(1) + " MB";
+            }
+            tv.text = lastTexRAM;
+            geov.text = lastGeoRAM;
+
+            const activeIndices = this.scene.getActiveIndices();
+            iv.text = activeIndices.toString();
+            pv.text = Math.floor(activeIndices / 3).toString();
+
+            const hasLOD = activeMeshes.data.some((m: any) => m.hasLODLevels);
+            lv.text = hasLOD ? "Active" : "Off";
+
+            const activeOcclusionQueries = this.scene.meshes.filter((m: any) => m.isOcclusionQueryInProgress).length;
+            ov.text = activeOcclusionQueries.toString();
+
+            if (this.camera) {
+                fcv.text = this.camera.maxZ.toString();
+            }
         });
     }
 
     private handleResize(): void {
-        const dpr = window.devicePixelRatio || 1.0;
-        this.engine.setHardwareScalingLevel(1 / dpr);
         this.engine.resize(true);
         if (this.camera && this.playerBox) this.resetCameraScale();
     }

@@ -1,11 +1,12 @@
 {
-  "name": "babylon-mmo-sample",
+  "name": "tommie-chat",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
     "//ktx2": "basisu your-image.png -ktx2 -mipmap -q 255",
     "ktx2": "toktx --t2 --encode uastc --genmipmap pic1.ktx2 pic1.png",
+    "start": "vite preview",
     "dev": "vite",
     "check": "tsc --noEmit",
     "build": "tsc && vite build",
