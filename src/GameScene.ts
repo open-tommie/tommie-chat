@@ -47,12 +47,12 @@ export class GameScene {
     private time = 0;
     private npc001!: Mesh;
     private npc002!: Mesh;
-    private npc003!: Mesh;                    // ← 新規追加
+    private npc003!: Mesh;                    
     private npc001BaseX = 0;
     private npc002BaseX = 1.5;
     private npc002BaseZ = 3;
-    private npc003BaseX = 3;                  // ← 新規追加（円の中心）
-    private npc003BaseZ = 3;                  // ← 新規追加
+    private npc003BaseX = 3;                  
+    private npc003BaseZ = 3;                  
     // ===================================================
 
     constructor(canvas: HTMLCanvasElement) {
@@ -74,8 +74,6 @@ export class GameScene {
             }
         });
 
-        // canvasそのものを監視することで、デバッグパネルのリサイズ等による
-        // 誤った window.resize 発火でエンジンがリサイズされるのを防ぐ
         const canvasResizeObserver = new ResizeObserver(() => {
             requestAnimationFrame(() => this.handleResize());
         });
@@ -91,6 +89,11 @@ export class GameScene {
             new Vector3(0, 0.9, 0),
             this.scene
         );
+
+        // βの可動範囲を 0(真上) ~ 80度 に限定
+        this.camera.lowerBetaLimit = 0;
+        this.camera.upperBetaLimit = 80 * Math.PI / 180;
+
         this.camera.attachControl(this.engine.getRenderingCanvas() as HTMLCanvasElement, true);
 
         this.camera.keysUp = [];
@@ -157,12 +160,10 @@ export class GameScene {
 
         if (!textarea || !sendBtn || !clearBtn) return;
 
-        // チャット履歴パネル：クッキー保存/復元・ドラッグ移動・リサイズ保存
         const historyPanel = document.getElementById("chat-history-panel") as HTMLElement;
         const historyHeader = document.getElementById("chat-history-header") as HTMLElement;
         if (historyPanel && historyHeader) {
 
-            // クッキー操作ユーティリティ
             const setCookie = (name: string, value: string) => {
                 document.cookie = `${name}=${encodeURIComponent(value)};path=/;max-age=${60 * 60 * 24 * 365}`;
             };
@@ -178,7 +179,6 @@ export class GameScene {
                 setCookie("chatHistHeight", String(Math.round(rect.height)));
             };
 
-            // クッキーから位置・サイズを復元
             const savedLeft   = getCookie("chatHistLeft");
             const savedTop    = getCookie("chatHistTop");
             const savedWidth  = getCookie("chatHistWidth");
@@ -188,7 +188,6 @@ export class GameScene {
             if (savedWidth  !== null) historyPanel.style.width  = savedWidth  + "px";
             if (savedHeight !== null) historyPanel.style.height = savedHeight + "px";
 
-            // ドラッグ移動
             let isDragging = false;
             let dragOffsetX = 0;
             let dragOffsetY = 0;
@@ -215,14 +214,12 @@ export class GameScene {
                 }
             });
 
-            // リサイズ監視（ResizeObserver）
             const resizeObserver = new ResizeObserver(() => {
                 savePanelState();
             });
             resizeObserver.observe(historyPanel);
         }
 
-        // チャット履歴に1件追加する関数
         const addChatHistory = (avatarName: string, text: string) => {
             if (!text) return;
             const list = document.getElementById("chat-history-list");
@@ -467,7 +464,6 @@ export class GameScene {
 
         this.playerBox = this.createAvatar("tommie.jp", "/textures/pic1.ktx2", 0, 0);
 
-        // 自分のアバターの台座をピンク色に設定
         const playerStandBase = this.playerBox.getChildMeshes().find(m => m.name === "tommie.jp_standBase");
         if (playerStandBase && playerStandBase.material) {
             (playerStandBase.material as StandardMaterial).diffuseColor = new Color3(1.0, 0.4, 0.7);
@@ -479,7 +475,7 @@ export class GameScene {
 
         this.npc001 = player2;
         this.npc002 = player3;
-        this.npc003 = player4;                    // ← 新規追加
+        this.npc003 = player4;                    
 
         this.createNameTag(this.playerBox, "tommie.jp✅️");
         this.createNameTag(player2, "npc001");
@@ -494,7 +490,6 @@ export class GameScene {
         const updateNpc002Speech = this.createSpeechBubble(player3, "キタちゃん２です");
         const updateNpc003Speech = this.createSpeechBubble(player4, "キタちゃん３です");
 
-        // NPC定期チャット投稿
         const getNpcMessage = (label: string) => {
             const now = new Date();
             const hh = String(now.getHours()).padStart(2, "0");
@@ -633,21 +628,27 @@ export class GameScene {
                 if (distance > moveDist) {
                     const direction = target.subtract(currentPos).normalize();
                     this.playerBox.position.addInPlace(direction.scale(moveDist));
-                    
+
                     const targetAngle = Math.atan2(direction.x, direction.z) + Math.PI;
                     let diff = targetAngle - this.playerBox.rotation.y;
                     while (diff < -Math.PI) diff += Math.PI * 2;
                     while (diff > Math.PI) diff -= Math.PI * 2;
                     this.playerBox.rotation.y += diff * Math.min(1.0, 15.0 * deltaTime);
+
+                    const moveAngle = Math.atan2(direction.x, direction.z);
+                    const destAlpha = -moveAngle - Math.PI / 2; 
+
+                    let alphaDiff = destAlpha - this.camera.alpha;
+                    while (alphaDiff < -Math.PI) alphaDiff += Math.PI * 2;
+                    while (alphaDiff >  Math.PI) alphaDiff -= Math.PI * 2;
+                    this.camera.alpha += alphaDiff * Math.min(1.0, 2.0 * deltaTime);
                 } else {
                     this.playerBox.position.copyFrom(target);
-                    this.targetPosition = null; 
-                    this.clickMarker.isVisible = false; 
+                    this.targetPosition = null;
+                    this.clickMarker.isVisible = false;
                 }
             }
 
-            // ==================== NPC自動移動（位置＋進行方向回転） ====================
-            // npc001：左右10単位往復
             this.npc001.position.x = this.npc001BaseX + 10 * Math.sin(this.time * 0.8);
             const velocityX = 10 * 0.8 * Math.cos(this.time * 0.8);
             if (Math.abs(velocityX) > 0.01) {
@@ -658,7 +659,6 @@ export class GameScene {
                 this.npc001.rotation.y += diff1 * 0.25;
             }
 
-            // npc002：10単位の正方形軌道
             const cycle = (this.time * 0.6) % 40;
             let targetX2 = this.npc002.position.x;
             let targetZ2 = this.npc002.position.z;
@@ -677,11 +677,9 @@ export class GameScene {
                 this.npc002.rotation.y += diff2 * 0.15;
             }
 
-            // npc003：半径5の円軌道（時計回り）
-            const angle = this.time * 1.2;                    // 速度調整可能
+            const angle = this.time * 1.2;                    
             this.npc003.position.x = this.npc003BaseX + 5 * Math.cos(angle);
             this.npc003.position.z = this.npc003BaseZ + 5 * Math.sin(angle);
-            // 進行方向回転
             const velocity3 = new Vector3(-5 * 1.2 * Math.sin(angle), 0, 5 * 1.2 * Math.cos(angle));
             if (velocity3.length() > 0.01) {
                 const targetAngle3 = Math.atan2(velocity3.x, velocity3.z) + Math.PI;
@@ -690,7 +688,6 @@ export class GameScene {
                 while (diff3 > Math.PI) diff3 -= Math.PI * 2;
                 this.npc003.rotation.y += diff3 * 0.25;
             }
-            // =====================================================================
 
             if (this.renderingPipeline.depthOfFieldEnabled && this.renderingPipeline.depthOfField) {
                 this.renderingPipeline.depthOfField.focusDistance = this.camera.radius * 1000;
@@ -880,9 +877,6 @@ export class GameScene {
         const topViewBtn     = document.getElementById("topViewBtn")     as HTMLButtonElement;
         const defaultPosBtn  = document.getElementById("defaultPosBtn")  as HTMLButtonElement;
 
-        // ============================================================
-        // デバッグパネル：クッキー・ドラッグ・最小化・リサイズ
-        // ============================================================
         const debugOverlay   = document.getElementById("debug-overlay")      as HTMLElement;
         const debugTitleBar  = document.getElementById("debug-title-bar")    as HTMLElement;
         const debugMinBtn    = document.getElementById("debug-minimize-btn") as HTMLButtonElement;
@@ -892,7 +886,6 @@ export class GameScene {
 
         if (debugOverlay && debugTitleBar && debugMinBtn && debugRestBtn && debugBody) {
 
-            // --- クッキー ユーティリティ ---
             const setCookie = (name: string, value: string) => {
                 document.cookie = `${name}=${encodeURIComponent(value)};path=/;max-age=${60*60*24*365}`;
             };
@@ -900,14 +893,12 @@ export class GameScene {
                 const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
                 return m ? decodeURIComponent(m[1]) : null;
             };
-            // 位置・サイズともにoverlayで管理（resizeハンドルもoverlay側）
             let isMaximized = false;
             const saveDebugState = () => {
                 const overlayRect = debugOverlay.getBoundingClientRect();
                 const isMinimized = debugOverlay.classList.contains("minimized");
                 setCookie("dbgLeft", String(Math.round(overlayRect.left)));
                 setCookie("dbgTop",  String(Math.round(overlayRect.top)));
-                // 最小化中・最大化中は幅・高さを上書きしない（復元用サイズを維持）
                 if (!isMinimized && !isMaximized) {
                     setCookie("dbgWidth",  String(Math.round(overlayRect.width)));
                     setCookie("dbgHeight", String(Math.round(overlayRect.height)));
@@ -915,7 +906,6 @@ export class GameScene {
                 setCookie("dbgMin", isMinimized ? "1" : "0");
             };
 
-            // --- 位置・サイズ・最小化状態を復元 ---
             const savedLeft  = getCookie("dbgLeft");
             const savedTop   = getCookie("dbgTop");
             const savedWidth = getCookie("dbgWidth");
@@ -925,12 +915,10 @@ export class GameScene {
             debugOverlay.style.right = "";
             if (savedLeft  !== null) debugOverlay.style.left  = savedLeft  + "px";
             if (savedTop   !== null) debugOverlay.style.top   = savedTop   + "px";
-            // サイズはoverlayに適用（最小化中は幅・高さを復元しない — CSSのfit-contentに委ねる）
             if (savedWidth !== null && savedMin !== "1") debugOverlay.style.width  = savedWidth + "px";
             if (savedHeight!== null && savedMin !== "1") debugOverlay.style.height = savedHeight + "px";
             if (savedMin === "1") debugOverlay.classList.add("minimized");
 
-            // --- ドラッグ移動 ---
             let isDragging = false;
             let dragOX = 0, dragOY = 0;
 
@@ -951,12 +939,10 @@ export class GameScene {
                 if (isDragging) { isDragging = false; saveDebugState(); }
             });
 
-            // --- 最小化 / 復元 ---
             let savedOverlayHeight = "";
             let savedOverlayWidth  = "";
             debugMinBtn.addEventListener("click", () => {
                 if (isMaximized) {
-                    // 最大化中に最小化した場合は、最大化「前」のサイズを保存する
                     savedOverlayWidth  = savedMaxWidth  || (savedWidth  !== null ? savedWidth  + "px" : "270px");
                     savedOverlayHeight = savedMaxHeight || (savedHeight !== null ? savedHeight + "px" : "");
                     isMaximized = false;
@@ -964,31 +950,27 @@ export class GameScene {
                     savedOverlayWidth  = debugOverlay.style.width;
                     savedOverlayHeight = debugOverlay.style.height;
                 }
-                debugOverlay.style.height = ""; // 高さをクリア → タイトルバーだけの高さに縮小
-                debugOverlay.style.width  = ""; // 幅もクリア  → CSS fit-content で縮小
+                debugOverlay.style.height = ""; 
+                debugOverlay.style.width  = ""; 
                 debugOverlay.classList.add("minimized");
                 saveDebugState();
             });
             debugRestBtn.addEventListener("click", () => {
                 debugOverlay.classList.remove("minimized");
                 isMaximized = false;
-                // JS変数（同セッション内の最小化前サイズ）→ なければクッキーから復元
                 debugOverlay.style.width  = savedOverlayWidth  || (savedWidth  !== null ? savedWidth  + "px" : "270px");
                 debugOverlay.style.height = savedOverlayHeight || (savedHeight !== null ? savedHeight + "px" : "");
                 saveDebugState();
             });
 
-            // --- タイトルバーダブルクリック：最大化 / 最大化解除 ---
             let savedMaxWidth = "", savedMaxHeight = "", savedMaxLeft = "", savedMaxTop = "";
             debugTitleBar.addEventListener("dblclick", (e: MouseEvent) => {
                 if ((e.target as HTMLElement).tagName === "BUTTON") return;
                 if (debugOverlay.classList.contains("minimized")) {
-                    // 最小化中はダブルクリックで復元
                     debugRestBtn.click();
                     return;
                 }
                 if (!isMaximized) {
-                    // 通常 → 最大化
                     savedMaxWidth  = debugOverlay.style.width;
                     savedMaxHeight = debugOverlay.style.height;
                     savedMaxLeft   = debugOverlay.style.left;
@@ -999,7 +981,6 @@ export class GameScene {
                     debugOverlay.style.top    = "15px";
                     isMaximized = true;
                 } else {
-                    // 最大化 → 通常に戻す
                     debugOverlay.style.width  = savedMaxWidth  || (savedWidth  !== null ? savedWidth  + "px" : "270px");
                     debugOverlay.style.height = savedMaxHeight || (savedHeight !== null ? savedHeight + "px" : "");
                     debugOverlay.style.left   = savedMaxLeft   || (savedLeft   !== null ? savedLeft   + "px" : "");
@@ -1009,31 +990,26 @@ export class GameScene {
                 }
             });
 
-            // --- リサイズ監視（overlayのresizeハンドルを監視）---
             const resizeObserver = new ResizeObserver(() => {
                 if (!debugOverlay.classList.contains("minimized") && !isMaximized) saveDebugState();
             });
             resizeObserver.observe(debugOverlay);
         }
 
-        // ===== ハンバーガーメニュー =====
         {
             const menuBtn    = document.getElementById("menu-btn")!;
             const menuPopup  = document.getElementById("menu-popup")!;
             const cookieReset = document.getElementById("menu-cookie-reset")!;
 
-            // ボタンでトグル
             menuBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
                 menuPopup.classList.toggle("open");
             });
 
-            // メニュー外クリックで閉じる
             document.addEventListener("click", () => {
                 menuPopup.classList.remove("open");
             });
 
-            // クッキーリセット：すべてのクッキーを削除してリロード
             cookieReset.addEventListener("click", () => {
                 document.cookie.split(";").forEach(c => {
                     const name = c.trim().split("=")[0];
@@ -1197,10 +1173,11 @@ export class GameScene {
             });
         }
 
+        // 【修正】Top View ボタン押下時のカメラアングルを α=90°, β=0° に固定
         if (topViewBtn && this.camera && this.playerBox) {
             topViewBtn.addEventListener("click", () => {
-                this.camera.alpha = this.playerBox.rotation.y + Math.PI;
-                this.camera.beta = 0.001;
+                this.camera.alpha = Math.PI / 2; // 90度
+                this.camera.beta = 0;           // 0度 (真上)
                 this.camera.radius = this.camera.upperRadiusLimit;
             });
         }
@@ -1210,6 +1187,10 @@ export class GameScene {
                 this.playerBox.position.set(0, 0, 0);
                 this.playerBox.rotation.y = 0;
                 this.targetPosition = null;
+
+                this.camera.alpha = Math.PI / 2; 
+                this.camera.beta = Math.PI / 4;  
+                this.camera.radius = 10.0;       
             });
         }
 
