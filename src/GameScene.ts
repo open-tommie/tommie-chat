@@ -417,15 +417,14 @@ export class GameScene {
         namePlane.parent = targetMesh;
         namePlane.position = new Vector3(0, 1.75, 0);
 
-        const dpr = window.devicePixelRatio || 1;
-        const adt = AdvancedDynamicTexture.CreateForMesh(namePlane, 3600 * dpr, 300 * dpr);
+        const adt = AdvancedDynamicTexture.CreateForMesh(namePlane, 1024, 128);
 
         const textBlock = new TextBlock();
         textBlock.text = nameText;
         textBlock.color = "white";
-        textBlock.fontSize = `${80 * dpr}px`;
+        textBlock.fontSize = "56px";
         textBlock.fontWeight = "bold";
-        textBlock.outlineWidth = 12 * dpr;
+        textBlock.outlineWidth = 6;
         textBlock.outlineColor = "black";
         
         adt.addControl(textBlock);
@@ -707,9 +706,8 @@ export class GameScene {
         bubblePlane.parent = targetMesh;
         bubblePlane.position = new Vector3(0, 2.05, 0); 
         
-        const dpr = window.devicePixelRatio || 1;
-        const adt = AdvancedDynamicTexture.CreateForMesh(bubblePlane, 3600 * dpr, 260 * dpr);
-        
+        const adt = AdvancedDynamicTexture.CreateForMesh(bubblePlane, 1024, 128);
+
         const bg = new Rectangle();
         bg.width = "100%"; bg.height = "100%";
         bg.cornerRadius = 20;
@@ -720,26 +718,18 @@ export class GameScene {
 
         const textBlock = new TextBlock();
         textBlock.text = speechText;
-        textBlock.fontSize = `${80 * dpr}px`;
+        textBlock.fontSize = "48px";
         textBlock.color = "black";
-        
+
         textBlock.textWrapping = true;
         textBlock.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
         textBlock.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-        textBlock.paddingLeft = `${35 * dpr}px`;
-        textBlock.paddingRight = `${35 * dpr}px`;
-        textBlock.paddingTop = `${20 * dpr}px`;
-        textBlock.paddingBottom = `${20 * dpr}px`;
-        
-        bg.addControl(textBlock);
+        textBlock.paddingLeft = "20px";
+        textBlock.paddingRight = "20px";
+        textBlock.paddingTop = "8px";
+        textBlock.paddingBottom = "8px";
 
-        this.scene.onBeforeRenderObservable.add(() => {
-            if (!textBlock.text || textBlock.text.trim() === "") {
-                bubblePlane.isVisible = false;
-            } else {
-                bubblePlane.isVisible = true;
-            }
-        });
+        bg.addControl(textBlock);
         
         return (newText: string) => {
             if (newText && newText.trim() !== "") {
