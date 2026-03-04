@@ -143,7 +143,7 @@ export class GameScene {
             this.scene, 
             [this.camera]
         );
-        this.renderingPipeline.samples = 4; 
+        this.renderingPipeline.samples = 2;
         
         this.renderingPipeline.depthOfFieldEnabled = true;
         if (this.renderingPipeline.depthOfField) {
@@ -1044,7 +1044,7 @@ export class GameScene {
         if (aaBtn) {
             aaBtn.addEventListener("click", () => {
                 isAAEnabled = !isAAEnabled;
-                this.renderingPipeline.samples = isAAEnabled ? 4 : 1; 
+                this.renderingPipeline.samples = isAAEnabled ? 2 : 1;
                 aaBtn.innerText = isAAEnabled ? "On" : "Off";
                 if (isAAEnabled) aaBtn.classList.remove("off");
                 else aaBtn.classList.add("off");
