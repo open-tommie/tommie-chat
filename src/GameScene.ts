@@ -154,10 +154,97 @@ export class GameScene {
 
         if (!textarea || !sendBtn || !clearBtn) return;
 
+        // チャット履歴パネル：クッキー保存/復元・ドラッグ移動・リサイズ保存
+        const historyPanel = document.getElementById("chat-history-panel") as HTMLElement;
+        const historyHeader = document.getElementById("chat-history-header") as HTMLElement;
+        if (historyPanel && historyHeader) {
+
+            // クッキー操作ユーティリティ
+            const setCookie = (name: string, value: string) => {
+                document.cookie = `${name}=${encodeURIComponent(value)};path=/;max-age=${60 * 60 * 24 * 365}`;
+            };
+            const getCookie = (name: string): string | null => {
+                const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+                return match ? decodeURIComponent(match[1]) : null;
+            };
+            const savePanelState = () => {
+                const rect = historyPanel.getBoundingClientRect();
+                setCookie("chatHistLeft",   String(Math.round(rect.left)));
+                setCookie("chatHistTop",    String(Math.round(rect.top)));
+                setCookie("chatHistWidth",  String(Math.round(rect.width)));
+                setCookie("chatHistHeight", String(Math.round(rect.height)));
+            };
+
+            // クッキーから位置・サイズを復元
+            const savedLeft   = getCookie("chatHistLeft");
+            const savedTop    = getCookie("chatHistTop");
+            const savedWidth  = getCookie("chatHistWidth");
+            const savedHeight = getCookie("chatHistHeight");
+            if (savedLeft   !== null) historyPanel.style.left   = savedLeft   + "px";
+            if (savedTop    !== null) historyPanel.style.top    = savedTop    + "px";
+            if (savedWidth  !== null) historyPanel.style.width  = savedWidth  + "px";
+            if (savedHeight !== null) historyPanel.style.height = savedHeight + "px";
+
+            // ドラッグ移動
+            let isDragging = false;
+            let dragOffsetX = 0;
+            let dragOffsetY = 0;
+
+            historyHeader.addEventListener("mousedown", (e: MouseEvent) => {
+                isDragging = true;
+                dragOffsetX = e.clientX - historyPanel.getBoundingClientRect().left;
+                dragOffsetY = e.clientY - historyPanel.getBoundingClientRect().top;
+                e.preventDefault();
+            });
+
+            document.addEventListener("mousemove", (e: MouseEvent) => {
+                if (!isDragging) return;
+                const x = Math.max(0, e.clientX - dragOffsetX);
+                const y = Math.max(0, e.clientY - dragOffsetY);
+                historyPanel.style.left = x + "px";
+                historyPanel.style.top  = y + "px";
+            });
+
+            document.addEventListener("mouseup", () => {
+                if (isDragging) {
+                    isDragging = false;
+                    savePanelState();
+                }
+            });
+
+            // リサイズ監視（ResizeObserver）
+            const resizeObserver = new ResizeObserver(() => {
+                savePanelState();
+            });
+            resizeObserver.observe(historyPanel);
+        }
+
+        // チャット履歴に1件追加する関数
+        const addChatHistory = (avatarName: string, text: string) => {
+            if (!text) return;
+            const list = document.getElementById("chat-history-list");
+            if (!list) return;
+
+            const now = new Date();
+            const hh = String(now.getHours()).padStart(2, "0");
+            const mm = String(now.getMinutes()).padStart(2, "0");
+            const timeStr = `${hh}:${mm}`;
+
+            const entry = document.createElement("div");
+            entry.className = "chat-history-entry";
+            entry.innerHTML =
+                `<span class="chat-history-time">${timeStr}</span>` +
+                `<span class="chat-history-name">${avatarName}</span>` +
+                `<span class="chat-history-text">${text}</span>`;
+            list.appendChild(entry);
+            list.scrollTop = list.scrollHeight;
+        };
+
         const sendMessage = () => {
             const text = textarea.value.trim();
             if (this.updatePlayerSpeech) {
                 this.updatePlayerSpeech(text);
+                if (text) addChatHistory("tommie.jp", text);
                 textarea.value = "";
             }
         };
@@ -376,6 +463,13 @@ export class GameScene {
         this.clickMarker.isPickable = false;
 
         this.playerBox = this.createAvatar("tommie.jp", "/textures/pic1.ktx2", 0, 0);
+
+        // 自分のアバターの台座をピンク色に設定
+        const playerStandBase = this.playerBox.getChildMeshes().find(m => m.name === "tommie.jp_standBase");
+        if (playerStandBase && playerStandBase.material) {
+            (playerStandBase.material as StandardMaterial).diffuseColor = new Color3(1.0, 0.4, 0.7);
+        }
+
         const player2 = this.createAvatar("npc001", "/textures/pic2.ktx2", 0, 3);
         const player3 = this.createAvatar("npc002", "/textures/pic2.ktx2", 1.5, 3);
         const player4 = this.createAvatar("npc003", "/textures/pic2.ktx2", 3, 3);
@@ -393,9 +487,52 @@ export class GameScene {
         this.createCoordinateLabels();
         
         this.updatePlayerSpeech = this.createSpeechBubble(this.playerBox, "こんにちは！");
-        this.createSpeechBubble(player2, "キタちゃん１です。");
-        this.createSpeechBubble(player3, "キタちゃん２です");
-        this.createSpeechBubble(player4, "キタちゃん３です");
+        const updateNpc001Speech = this.createSpeechBubble(player2, "キタちゃん１です。");
+        const updateNpc002Speech = this.createSpeechBubble(player3, "キタちゃん２です");
+        const updateNpc003Speech = this.createSpeechBubble(player4, "キタちゃん３です");
+
+        // NPC定期チャット投稿
+        const getNpcMessage = (label: string) => {
+            const now = new Date();
+            const hh = String(now.getHours()).padStart(2, "0");
+            const mm = String(now.getMinutes()).padStart(2, "0");
+            const ss = String(now.getSeconds()).padStart(2, "0");
+            return `${label}時刻の時分は${hh}:${mm}:${ss}です⭐️`;
+        };
+        const addChatHistoryGlobal = (avatarName: string, text: string) => {
+            const list = document.getElementById("chat-history-list");
+            if (!list) return;
+            const now = new Date();
+            const hh = String(now.getHours()).padStart(2, "0");
+            const mm = String(now.getMinutes()).padStart(2, "0");
+            const ss = String(now.getSeconds()).padStart(2, "0");
+            const entry = document.createElement("div");
+            entry.className = "chat-history-entry";
+            entry.innerHTML =
+                `<span class="chat-history-time">${hh}:${mm}:${ss}</span>` +
+                `<span class="chat-history-name">${avatarName}</span>` +
+                `<span class="chat-history-text">${text}</span>`;
+            list.appendChild(entry);
+            list.scrollTop = list.scrollHeight;
+        };
+
+        setInterval(() => {
+            const msg = getNpcMessage("キタちゃん１です。");
+            updateNpc001Speech(msg);
+            addChatHistoryGlobal("npc001", msg);
+        }, 3000);
+
+        setInterval(() => {
+            const msg = getNpcMessage("キタちゃん２です。");
+            updateNpc002Speech(msg);
+            addChatHistoryGlobal("npc002", msg);
+        }, 5000);
+
+        setInterval(() => {
+            const msg = getNpcMessage("キタちゃん３です。");
+            updateNpc003Speech(msg);
+            addChatHistoryGlobal("npc003", msg);
+        }, 8000);
 
         this.createDebugOverlay();
 
