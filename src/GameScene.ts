@@ -109,17 +109,13 @@ export class GameScene {
         this.camera.fov = 60 * Math.PI / 180;
 
         const hemiLight = new HemisphericLight("hemiLight", new Vector3(0, 1, 0), this.scene);
-        hemiLight.intensity = 0.8; 
-        hemiLight.groundColor = new Color3(0.8, 0.8, 0.8);
-        hemiLight.specular = new Color3(0, 0, 0); 
+        hemiLight.intensity = 0.8;
+        hemiLight.groundColor = new Color3(0.9, 0.9, 0.9);
+        hemiLight.specular = new Color3(0, 0, 0);
 
         const dirLightFront = new DirectionalLight("dirLightFront", new Vector3(-0.5, -1.0, 1.0), this.scene);
-        dirLightFront.intensity = 0.6;
-        dirLightFront.specular = new Color3(1.0, 1.0, 1.0); 
-
-        const dirLightBack = new DirectionalLight("dirLightBack", new Vector3(0.5, -1.0, -1.0), this.scene);
-        dirLightBack.intensity = 0.6;
-        dirLightBack.specular = new Color3(1.0, 1.0, 1.0); 
+        dirLightFront.intensity = 0.7;
+        dirLightFront.specular = new Color3(1.0, 1.0, 1.0);
 
         const skyColor = Color3.FromHexString("#a0d7f3");
         this.scene.clearColor = new Color4(skyColor.r, skyColor.g, skyColor.b, 1.0);
