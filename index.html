@@ -373,8 +373,15 @@
                 <button id="lodBtn" class="debug-btn off">Off</button>
             </td></tr>
             <tr><td class="label" title="18.OcclQ&#10;オクルージョンクエリ数（障害物で隠れたオブジェクトの描画省略判定）&#10;初期値: 0&#10;典型的なMMO: 0〜50&#10;Minecraft: 洞窟内オクルージョンカリングあり（Java版は視線ベースのチャンクカリング）">18.OcclQ:</td><td class="value" id="val-occlq">0</td></tr>
-            <tr><td class="label" title="19.FarClip&#10;カメラの最遠クリップ距離（これより遠いオブジェクトを描画しない）&#10;初期値: 90&#10;典型的なMMO: 100〜1000（フォグ終点に合わせると自然）&#10;Minecraft: 描画距離 初期値12チャンク（192m）, 範囲2〜32チャンク（32〜512m）">19.FarClip:</td><td class="value">
-                <input type="number" id="farClipInput" class="debug-input" value="90" step="1">
+            <tr><td class="label" title="19.FarClip&#10;カメラの最遠クリップ距離（これより遠いオブジェクトを描画しない）&#10;初期値: 200&#10;典型的なMMO: 100〜1000（フォグ終点に合わせると自然）&#10;Minecraft: 描画距離 初期値12チャンク（192m）, 範囲2〜32チャンク（32〜512m）">19.FarClip:</td><td class="value">
+                <select id="farClipInput" class="debug-select">
+                    <option value="10">10</option>
+                    <option value="100">100</option>
+                    <option value="200" selected>200</option>
+                    <option value="500">500</option>
+                    <option value="1000">1000</option>
+                    <option value="2000">2000</option>
+                </select>
             </td></tr>
             <tr>
                 <td class="label" title="20.FOV&#10;視野角（Field of View）。大きいほど広角・魚眼に近くなる&#10;初期値: 60°&#10;典型的なMMO: 60〜90°（TPSは60〜75°が多い）&#10;Minecraft: 初期値 70°（Normal）, 範囲 30〜110°（Quakepro=110°, Normal=70°）">20.FOV:</td>

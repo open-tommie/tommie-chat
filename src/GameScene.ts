@@ -106,7 +106,7 @@ export class GameScene {
         this.camera.fovMode = ArcRotateCamera.FOVMODE_VERTICAL_FIXED;
         this.camera.inertia = 0;
         
-        this.camera.maxZ = 500;
+        this.camera.maxZ = 200;
         this.camera.fov = 60 * Math.PI / 180;
 
         const hemiLight = new HemisphericLight("hemiLight", new Vector3(0, 1, 0), this.scene);
@@ -847,7 +847,7 @@ export class GameScene {
         const scaleSelect = document.getElementById("scaleSelect") as HTMLSelectElement;
 
         const lodBtn = document.getElementById("lodBtn") as HTMLButtonElement;
-        const farClipInput = document.getElementById("farClipInput") as HTMLInputElement;
+        const farClipInput = document.getElementById("farClipInput") as HTMLSelectElement;
         const fovSelect = document.getElementById("fovSelect") as HTMLSelectElement;
         const fovInput = document.getElementById("fovInput") as HTMLInputElement;
         const fogBtn = document.getElementById("fogBtn") as HTMLButtonElement;
@@ -1049,8 +1049,8 @@ export class GameScene {
         }
 
         if (farClipInput && this.camera) {
-            farClipInput.addEventListener("input", (e) => {
-                const val = parseFloat((e.target as HTMLInputElement).value);
+            farClipInput.addEventListener("change", (e) => {
+                const val = parseFloat((e.target as HTMLSelectElement).value);
                 if (!isNaN(val) && val > 0) {
                     this.camera.maxZ = val;
                     this.scene.fogEnd = val;
