@@ -39,6 +39,7 @@ export class GameScene {
     private clickMarker!: Mesh;
 
     private updatePlayerSpeech!: (newText: string) => void;
+    private updatePlayerNameTag!: (newName: string) => void;
     private renderingPipeline: DefaultRenderingPipeline | null = null;
     private camSpecLight!: DirectionalLight;
 
@@ -220,11 +221,50 @@ export class GameScene {
             list.scrollTop = list.scrollHeight;
         };
 
+        const setCookie = (key: string, value: string) => {
+            document.cookie = `${key}=${encodeURIComponent(value)};path=/;max-age=${60 * 60 * 24 * 365}`;
+        };
+        const getCookie = (key: string): string | null => {
+            const match = document.cookie.match(new RegExp("(?:^|; )" + key + "=([^;]*)"));
+            return match ? decodeURIComponent(match[1]) : null;
+        };
+
+        const loginNameInput = document.getElementById("loginName") as HTMLInputElement;
+        const loginBtn = document.getElementById("loginBtn") as HTMLButtonElement;
+
+        // クッキーから復元
+        const savedLoginName = getCookie("loginName");
+        if (savedLoginName && loginNameInput) {
+            loginNameInput.value = savedLoginName;
+            this.updatePlayerNameTag(savedLoginName);
+        }
+
+        const applyLoginName = () => {
+            const name = loginNameInput?.value.trim();
+            if (name) {
+                this.updatePlayerNameTag(name);
+                setCookie("loginName", name);
+            }
+        };
+
+        if (loginBtn) loginBtn.onclick = applyLoginName;
+        if (loginNameInput) {
+            loginNameInput.onkeydown = (e) => {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    applyLoginName();
+                }
+            };
+        }
+
         const sendMessage = () => {
             const text = textarea.value.trim();
             if (this.updatePlayerSpeech) {
                 this.updatePlayerSpeech(text);
-                if (text) addChatHistory("tommie.jp", text);
+                if (text) {
+                    const name = loginNameInput?.value.trim() || "tommie.jp";
+                    addChatHistory(name, text);
+                }
                 textarea.value = "";
             }
         };
@@ -389,11 +429,11 @@ export class GameScene {
         return avatarRoot;
     }
 
-    private createNameTag(targetMesh: Mesh, nameText: string): void {
+    private createNameTag(targetMesh: Mesh, nameText: string): (newName: string) => void {
         const namePlane = MeshBuilder.CreatePlane("nameTag_" + targetMesh.name, { width: 1.5, height: 0.40 }, this.scene);
         namePlane.billboardMode = Mesh.BILLBOARDMODE_ALL;
         namePlane.isPickable = false;
-        
+
         namePlane.parent = targetMesh;
         namePlane.position = new Vector3(0, 1.75, 0);
 
@@ -406,8 +446,10 @@ export class GameScene {
         textBlock.fontWeight = "bold";
         textBlock.outlineWidth = 6;
         textBlock.outlineColor = "black";
-        
+
         adt.addControl(textBlock);
+
+        return (newName: string) => { textBlock.text = newName; };
     }
 
     private createObjects(): void {
@@ -457,7 +499,7 @@ export class GameScene {
         this.npc002 = player3;
         this.npc003 = player4;                    
 
-        this.createNameTag(this.playerBox, "tommie.jp✅️");
+        this.updatePlayerNameTag = this.createNameTag(this.playerBox, "tommie.jp✅️");
         this.createNameTag(player2, "npc001");
         this.createNameTag(player3, "npc002");
         this.createNameTag(player4, "npc003");

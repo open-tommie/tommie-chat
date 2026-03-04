@@ -49,9 +49,33 @@ Download the React DevTools for a better development experience: https://react.d
 Blocked aria-hidden on an element because its descendant retained focus...
 ```
 
-# Babylon.js（およびWebGPU/WebGL環境）で利用する場合、
-# basisuよりも圧倒的に toktx がおすすめです。
+- Babylon.js（およびWebGPU/WebGL環境）で利用する場合、
+- basisuよりも圧倒的に toktx がおすすめです。
 
-
+```bash
 toktx --t2 --encode uastc --genmipmap output.ktx2 input_transparent.png
+```
+
+---
+
+## Nakama
+
+- MMOサーバー
+- 起動
+
+```bash
+cd ./nakama
+docker-compose up -d
+
+```
+
+- ローカルURL
+  - <http://localhost:7351>
+  - <http://127.0.0.1:7351>
+- ユーザー名
+  - `admin`
+- パスワード
+  - `password`
+
+---
 
