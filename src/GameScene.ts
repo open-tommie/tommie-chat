@@ -132,7 +132,7 @@ export class GameScene {
             this.scene, 
             [this.camera]
         );
-        this.renderingPipeline.samples = 2;
+        this.renderingPipeline.samples = 1;
         
         this.renderingPipeline.depthOfFieldEnabled = true;
         if (this.renderingPipeline.depthOfField) {
@@ -476,7 +476,7 @@ export class GameScene {
         
         this.updatePlayerSpeech = this.createSpeechBubble(this.playerBox, "こんにちは！");
         const updateNpc001Speech = this.createSpeechBubble(player2, "キタちゃん１です。");
-        const updateNpc002Speech = this.createSpeechBubble(player3, "キタちゃん２です");
+        const updateNpc002Speech = this.createSpeechBubble(player3, "キターちゃん２です");
         const updateNpc003Speech = this.createSpeechBubble(player4, "キタちゃん３です");
 
         const getNpcMessage = (label: string) => {
@@ -484,7 +484,7 @@ export class GameScene {
             const hh = String(now.getHours()).padStart(2, "0");
             const mm = String(now.getMinutes()).padStart(2, "0");
             const ss = String(now.getSeconds()).padStart(2, "0");
-            return `${label}時刻の時分は${hh}:${mm}:${ss}です⭐️`;
+            return `${label}時刻の分秒は${mm}:${ss}です！`;
         };
         const addChatHistoryGlobal = (avatarName: string, text: string) => {
             const list = document.getElementById("chat-history-list");
@@ -504,19 +504,19 @@ export class GameScene {
         };
 
         setInterval(() => {
-            const msg = getNpcMessage("キタちゃん１です。");
+            const msg = getNpcMessage("わーい。キタちゃん１です。");
             updateNpc001Speech(msg);
             addChatHistoryGlobal("npc001", msg);
         }, 3000);
 
         setInterval(() => {
-            const msg = getNpcMessage("キタちゃん２です。");
+            const msg = getNpcMessage("キタちゃん２です。❤");
             updateNpc002Speech(msg);
             addChatHistoryGlobal("npc002", msg);
         }, 5000);
 
         setInterval(() => {
-            const msg = getNpcMessage("キタちゃん３です。");
+            const msg = getNpcMessage("にゃにゃ。キタちゃん３です。🐕️");
             updateNpc003Speech(msg);
             addChatHistoryGlobal("npc003", msg);
         }, 8000);
@@ -1029,8 +1029,10 @@ export class GameScene {
             });
         }
 
-        let isAAEnabled = true;
+        let isAAEnabled = false;
         if (aaBtn) {
+            aaBtn.innerText = "Off";
+            aaBtn.classList.add("off");
             aaBtn.addEventListener("click", () => {
                 isAAEnabled = !isAAEnabled;
                 this.renderingPipeline.samples = isAAEnabled ? 2 : 1;
