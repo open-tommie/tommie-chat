@@ -749,7 +749,7 @@ export class GameScene {
         cloudMaterial.specularColor = new Color3(0, 0, 0); 
         cloudMaterial.emissiveColor = new Color3(0.6, 0.6, 0.6); 
         cloudMaterial.alpha = 0.6; 
-        cloudMaterial.backFaceCulling = false; 
+        cloudMaterial.backFaceCulling = true;
         cloudMaterial.freeze(); 
 
         const spheresToMerge: Mesh[] = [];
@@ -787,9 +787,9 @@ export class GameScene {
             const pattern = cloudPatterns[Math.floor(Math.random() * cloudPatterns.length)];
 
             for (const [bx, bz] of pattern) {
-                const sphere = MeshBuilder.CreateSphere(`cloud_${i}_${bx}_${bz}`, { 
-                    diameter: blockSize, 
-                    segments: 24 
+                const sphere = MeshBuilder.CreateSphere(`cloud_${i}_${bx}_${bz}`, {
+                    diameter: blockSize,
+                    segments: 8
                 }, this.scene);
 
                 sphere.scaling.set(1.0, 0.5, 1.0);
