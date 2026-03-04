@@ -41,53 +41,108 @@
         #clearBtn { background: #d7000034; }
 
         #debug-overlay {
-            position: absolute;
+            position: fixed;
             top: 15px;
             right: 15px;
-            width: 270px; 
-            background: rgba(255, 255, 255, 0.85); 
+            width: 270px;
+            min-width: 180px;
+            min-height: 40px;
+            background: rgba(255, 255, 255, 0.85);
             border-radius: 8px;
-            color: #000000; 
+            color: #000000;
             font-family: "Courier New", Courier, monospace;
-            font-size: 12px; 
-            padding: 8px 10px; 
+            font-size: 12px;
+            padding: 0;
             z-index: 100;
             pointer-events: auto;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15); 
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+            display: flex;
+            flex-direction: column;
+            /* overlayをリサイズコンテナにする（resizeにはoverflow!=visibleが必要） */
+            overflow: hidden;
+            resize: both;
         }
-        
-        #debug-overlay .overlay-title {
-            text-align: center;
+        #debug-overlay.minimized {
+            overflow: hidden;
+            resize: none;
+            min-height: 0;         /* タイトルバーの高さだけに縮小 */
+            width: fit-content;    /* タイトルテキスト＋ボタン幅に縮小 */
+        }
+        #debug-title-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 5px 8px 4px 8px;
+            border-bottom: 1px solid #000000;
+            cursor: grab;
+            flex-shrink: 0;
+            background: transparent;
+            user-select: none;
+            border-radius: 8px 8px 0 0;
+        }
+        #debug-title-bar:active { cursor: grabbing; }
+        #debug-title-text {
             font-weight: bold;
-            font-size: 14px; 
+            font-size: 14px;
             color: #000000;
-            margin-bottom: 4px; 
-            padding-bottom: 4px;
-            border-bottom: 1px solid #000000; 
-            cursor: help; 
+            flex: 1;
+            text-align: center;
         }
+        #debug-minimize-btn, #debug-restore-btn {
+            background: none;
+            border: 1px solid #888;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            line-height: 1;
+            padding: 0 4px;
+            margin-left: 4px;
+            color: #333;
+            flex-shrink: 0;
+        }
+        #debug-minimize-btn:hover, #debug-restore-btn:hover {
+            background: rgba(0,0,0,0.1);
+        }
+        #debug-body {
+            padding: 4px 10px 8px 10px;
+            overflow-x: hidden; /* 横スクロールバー（ゴミ）を抑制 */
+            overflow-y: auto;
+            flex: 1;
+            min-width: 0;
+            min-height: 0;
+            border-radius: 0 0 8px 8px;
+            background: rgba(255, 255, 255, 0.85);
+            box-sizing: border-box;
+        }
+        #debug-overlay.minimized #debug-body { display: none; }
+        #debug-overlay.minimized #debug-minimize-btn { display: none; }
+        #debug-overlay:not(.minimized) #debug-restore-btn { display: none; }
 
         #debug-overlay table {
             width: 100%;
             border-collapse: collapse;
+            table-layout: fixed; /* 列幅を固定してテーブルがパネル幅を超えないようにする */
         }
         #debug-overlay td {
-            padding: 1px 0; 
+            padding: 1px 0;
             vertical-align: middle;
+            overflow: hidden;
+            white-space: nowrap;
         }
         #debug-overlay td.label {
             text-align: left;
             width: 55%;
             font-weight: bold;
-            cursor: help; 
-            border-bottom: 1px dotted #aaaaaa; 
-            transition: all 0.2s ease; 
+            cursor: help;
+            border-bottom: 1px dotted #aaaaaa;
+            transition: all 0.2s ease;
+            text-overflow: ellipsis;
         }
-        
+
         #debug-overlay td.label:hover {
-            background-color: rgba(0, 0, 0, 0.08); 
-            color: #0056b3; 
-            border-bottom: 1px solid #0056b3; 
+            background-color: rgba(0, 0, 0, 0.08);
+            color: #0056b3;
+            border-bottom: 1px solid #0056b3;
         }
 
         #debug-overlay td.value {
@@ -207,6 +262,67 @@
         .chat-history-text {
             color: #222;
         }
+
+        /* ===== ハンバーガーメニュー ===== */
+        #menu-btn {
+            position: fixed;
+            bottom: 80px;
+            left: 15px;
+            width: 44px;
+            height: 44px;
+            background: rgba(0, 0, 0, 0.55);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            z-index: 200;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 5px;
+            padding: 0;
+        }
+        #menu-btn:hover {
+            background: rgba(0, 0, 0, 0.75);
+        }
+        #menu-btn span {
+            display: block;
+            width: 22px;
+            height: 2px;
+            background: #fff;
+            border-radius: 2px;
+        }
+        #menu-popup {
+            position: fixed;
+            bottom: 132px;
+            left: 15px;
+            background: rgba(30, 30, 30, 0.95);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            z-index: 200;
+            overflow: hidden;
+            display: none;
+            min-width: 160px;
+        }
+        #menu-popup.open {
+            display: block;
+        }
+        .menu-item {
+            display: block;
+            width: 100%;
+            padding: 10px 18px;
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 14px;
+            text-align: left;
+            cursor: pointer;
+            white-space: nowrap;
+            box-sizing: border-box;
+        }
+        .menu-item:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
     </style>
 </head>
 <body>
@@ -219,7 +335,12 @@
     </div>
     
     <div id="debug-overlay">
-        <div class="overlay-title" title="TommieChatはアバターチャットです。">tommieChat</div>
+        <div id="debug-title-bar">
+            <span id="debug-title-text" title="TommieChatはアバターチャットです。">tommieChat</span>
+            <button id="debug-minimize-btn" title="最小化">❌️</button>
+            <button id="debug-restore-btn" title="復元">□</button>
+        </div>
+        <div id="debug-body">
         <table>
             <tr><td class="label" title="・項目名：01.Ver:&#10;・説明：アプリケーションのバージョン。&#10;・初期値：0.0.11&#10;・一般的なMMOの設定範囲：-">01.Ver:</td><td class="value" id="val-ver">0.0.11</td></tr>
             <tr><td class="label" title="・項目名：02.Update:&#10;・説明：最終更新日。&#10;・初期値：2026/03/04&#10;・一般的なMMOの設定範囲：-">02.Update:</td><td class="value">2026/03/04</td></tr>
@@ -294,8 +415,22 @@
             <tr><td class="label" title="・項目名：31.Glossiness:&#10;・説明：アバター表面のテカリ(光沢)の強さ。0で反射なし、1で最大。&#10;・初期値：0.5&#10;・一般的なMMOの設定範囲：0.0〜1.0">31.Glossiness:</td><td class="value">
                 <input type="number" id="glossInput" class="debug-input" value="0.5" step="0.1" min="0" max="1">
             </td></tr>
+            <tr><td class="label" title="・項目名：33.Default Pos:&#10;・説明：自分のアバターの位置を初期値(0,0)にリセットします。&#10;・初期値：X=0, Z=0&#10;・一般的なMMOの設定範囲：スポーン地点への帰還">33.Default Pos:</td><td class="value">
+                <button id="defaultPosBtn" class="debug-btn">Reset</button>
+            </td></tr>
             <tr><td class="label" title="【基本操作(MMOスタイル)】&#10;[W][↑] 前進&#10;[S][↓] 後退&#10;[A][D] または [←][→] 左右移動&#10;[Q][E] カニ歩き&#10;[X] または [Space] オートラン停止&#10;[地面を左クリック] オートラン開始">32.Controls:</td><td class="value"></td></tr>
         </table>
+        </div>
+    </div>
+
+    <!-- ハンバーガーメニュー -->
+    <button id="menu-btn" title="メニュー">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+    <div id="menu-popup">
+        <button class="menu-item" id="menu-cookie-reset">クッキーリセット</button>
     </div>
 
     <div id="chat-container">

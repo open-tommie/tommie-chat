@@ -74,9 +74,12 @@ export class GameScene {
             }
         });
 
-        window.addEventListener("resize", () => {
+        // canvasそのものを監視することで、デバッグパネルのリサイズ等による
+        // 誤った window.resize 発火でエンジンがリサイズされるのを防ぐ
+        const canvasResizeObserver = new ResizeObserver(() => {
             requestAnimationFrame(() => this.handleResize());
         });
+        canvasResizeObserver.observe(canvas);
     }
 
     private setupScene(): void {
@@ -872,9 +875,133 @@ export class GameScene {
         const fStopInput = document.getElementById("fStopInput") as HTMLInputElement;
         const focalLengthInput = document.getElementById("focalLengthInput") as HTMLInputElement;
         const glossInput = document.getElementById("glossInput") as HTMLInputElement;
-        
-        const resetViewBtn = document.getElementById("resetViewBtn") as HTMLButtonElement;
-        const topViewBtn   = document.getElementById("topViewBtn") as HTMLButtonElement;
+
+        const resetViewBtn   = document.getElementById("resetViewBtn")   as HTMLButtonElement;
+        const topViewBtn     = document.getElementById("topViewBtn")     as HTMLButtonElement;
+        const defaultPosBtn  = document.getElementById("defaultPosBtn")  as HTMLButtonElement;
+
+        // ============================================================
+        // デバッグパネル：クッキー・ドラッグ・最小化・リサイズ
+        // ============================================================
+        const debugOverlay   = document.getElementById("debug-overlay")      as HTMLElement;
+        const debugTitleBar  = document.getElementById("debug-title-bar")    as HTMLElement;
+        const debugMinBtn    = document.getElementById("debug-minimize-btn") as HTMLButtonElement;
+        const debugRestBtn   = document.getElementById("debug-restore-btn")  as HTMLButtonElement;
+
+        const debugBody = document.getElementById("debug-body") as HTMLElement;
+
+        if (debugOverlay && debugTitleBar && debugMinBtn && debugRestBtn && debugBody) {
+
+            // --- クッキー ユーティリティ ---
+            const setCookie = (name: string, value: string) => {
+                document.cookie = `${name}=${encodeURIComponent(value)};path=/;max-age=${60*60*24*365}`;
+            };
+            const getCookie = (name: string): string | null => {
+                const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+                return m ? decodeURIComponent(m[1]) : null;
+            };
+            // 位置・サイズともにoverlayで管理（resizeハンドルもoverlay側）
+            const saveDebugState = () => {
+                const overlayRect = debugOverlay.getBoundingClientRect();
+                const isMinimized = debugOverlay.classList.contains("minimized");
+                setCookie("dbgLeft", String(Math.round(overlayRect.left)));
+                setCookie("dbgTop",  String(Math.round(overlayRect.top)));
+                // 最小化中は幅・高さを上書きしない（復元用サイズを維持）
+                if (!isMinimized) {
+                    setCookie("dbgWidth",  String(Math.round(overlayRect.width)));
+                    setCookie("dbgHeight", String(Math.round(overlayRect.height)));
+                }
+                setCookie("dbgMin", isMinimized ? "1" : "0");
+            };
+
+            // --- 位置・サイズ・最小化状態を復元 ---
+            const savedLeft  = getCookie("dbgLeft");
+            const savedTop   = getCookie("dbgTop");
+            const savedWidth = getCookie("dbgWidth");
+            const savedHeight= getCookie("dbgHeight");
+            const savedMin   = getCookie("dbgMin");
+
+            debugOverlay.style.right = "";
+            if (savedLeft  !== null) debugOverlay.style.left  = savedLeft  + "px";
+            if (savedTop   !== null) debugOverlay.style.top   = savedTop   + "px";
+            // サイズはoverlayに適用（最小化中は幅・高さを復元しない — CSSのfit-contentに委ねる）
+            if (savedWidth !== null && savedMin !== "1") debugOverlay.style.width  = savedWidth + "px";
+            if (savedHeight!== null && savedMin !== "1") debugOverlay.style.height = savedHeight + "px";
+            if (savedMin === "1") debugOverlay.classList.add("minimized");
+
+            // --- ドラッグ移動 ---
+            let isDragging = false;
+            let dragOX = 0, dragOY = 0;
+
+            debugTitleBar.addEventListener("mousedown", (e: MouseEvent) => {
+                if ((e.target as HTMLElement).tagName === "BUTTON") return;
+                isDragging = true;
+                const rect = debugOverlay.getBoundingClientRect();
+                dragOX = e.clientX - rect.left;
+                dragOY = e.clientY - rect.top;
+                e.preventDefault();
+            });
+            document.addEventListener("mousemove", (e: MouseEvent) => {
+                if (!isDragging) return;
+                debugOverlay.style.left = Math.max(0, e.clientX - dragOX) + "px";
+                debugOverlay.style.top  = Math.max(0, e.clientY - dragOY) + "px";
+            });
+            document.addEventListener("mouseup", () => {
+                if (isDragging) { isDragging = false; saveDebugState(); }
+            });
+
+            // --- 最小化 / 復元 ---
+            let savedOverlayHeight = "";
+            let savedOverlayWidth  = "";
+            debugMinBtn.addEventListener("click", () => {
+                savedOverlayHeight = debugOverlay.style.height;
+                savedOverlayWidth  = debugOverlay.style.width;
+                debugOverlay.style.height = ""; // 高さをクリア → タイトルバーだけの高さに縮小
+                debugOverlay.style.width  = ""; // 幅もクリア  → CSS fit-content で縮小
+                debugOverlay.classList.add("minimized");
+                saveDebugState();
+            });
+            debugRestBtn.addEventListener("click", () => {
+                debugOverlay.classList.remove("minimized");
+                // JS変数（同セッション内の最小化前サイズ）→ なければクッキーから復元
+                debugOverlay.style.width  = savedOverlayWidth  || (savedWidth  !== null ? savedWidth  + "px" : "270px");
+                debugOverlay.style.height = savedOverlayHeight || (savedHeight !== null ? savedHeight + "px" : "");
+                saveDebugState();
+            });
+
+            // --- リサイズ監視（overlayのresizeハンドルを監視）---
+            const resizeObserver = new ResizeObserver(() => {
+                if (!debugOverlay.classList.contains("minimized")) saveDebugState();
+            });
+            resizeObserver.observe(debugOverlay);
+        }
+
+        // ===== ハンバーガーメニュー =====
+        {
+            const menuBtn    = document.getElementById("menu-btn")!;
+            const menuPopup  = document.getElementById("menu-popup")!;
+            const cookieReset = document.getElementById("menu-cookie-reset")!;
+
+            // ボタンでトグル
+            menuBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                menuPopup.classList.toggle("open");
+            });
+
+            // メニュー外クリックで閉じる
+            document.addEventListener("click", () => {
+                menuPopup.classList.remove("open");
+            });
+
+            // クッキーリセット：すべてのクッキーを削除してリロード
+            cookieReset.addEventListener("click", () => {
+                document.cookie.split(";").forEach(c => {
+                    const name = c.trim().split("=")[0];
+                    if (name) document.cookie = `${name}=;path=/;max-age=0`;
+                });
+                location.reload();
+            });
+        }
 
         const playerPosVal = document.getElementById("val-player-pos");
         const camInfoVal = document.getElementById("val-cam-info");
@@ -1035,6 +1162,14 @@ export class GameScene {
                 this.camera.alpha = this.playerBox.rotation.y + Math.PI;
                 this.camera.beta = 0.001;
                 this.camera.radius = this.camera.upperRadiusLimit;
+            });
+        }
+
+        if (defaultPosBtn && this.playerBox) {
+            defaultPosBtn.addEventListener("click", () => {
+                this.playerBox.position.set(0, 0, 0);
+                this.playerBox.rotation.y = 0;
+                this.targetPosition = null;
             });
         }
 
