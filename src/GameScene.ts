@@ -901,13 +901,14 @@ export class GameScene {
                 return m ? decodeURIComponent(m[1]) : null;
             };
             // 位置・サイズともにoverlayで管理（resizeハンドルもoverlay側）
+            let isMaximized = false;
             const saveDebugState = () => {
                 const overlayRect = debugOverlay.getBoundingClientRect();
                 const isMinimized = debugOverlay.classList.contains("minimized");
                 setCookie("dbgLeft", String(Math.round(overlayRect.left)));
                 setCookie("dbgTop",  String(Math.round(overlayRect.top)));
-                // 最小化中は幅・高さを上書きしない（復元用サイズを維持）
-                if (!isMinimized) {
+                // 最小化中・最大化中は幅・高さを上書きしない（復元用サイズを維持）
+                if (!isMinimized && !isMaximized) {
                     setCookie("dbgWidth",  String(Math.round(overlayRect.width)));
                     setCookie("dbgHeight", String(Math.round(overlayRect.height)));
                 }
@@ -954,8 +955,15 @@ export class GameScene {
             let savedOverlayHeight = "";
             let savedOverlayWidth  = "";
             debugMinBtn.addEventListener("click", () => {
-                savedOverlayHeight = debugOverlay.style.height;
-                savedOverlayWidth  = debugOverlay.style.width;
+                if (isMaximized) {
+                    // 最大化中に最小化した場合は、最大化「前」のサイズを保存する
+                    savedOverlayWidth  = savedMaxWidth  || (savedWidth  !== null ? savedWidth  + "px" : "270px");
+                    savedOverlayHeight = savedMaxHeight || (savedHeight !== null ? savedHeight + "px" : "");
+                    isMaximized = false;
+                } else {
+                    savedOverlayWidth  = debugOverlay.style.width;
+                    savedOverlayHeight = debugOverlay.style.height;
+                }
                 debugOverlay.style.height = ""; // 高さをクリア → タイトルバーだけの高さに縮小
                 debugOverlay.style.width  = ""; // 幅もクリア  → CSS fit-content で縮小
                 debugOverlay.classList.add("minimized");
@@ -963,15 +971,47 @@ export class GameScene {
             });
             debugRestBtn.addEventListener("click", () => {
                 debugOverlay.classList.remove("minimized");
+                isMaximized = false;
                 // JS変数（同セッション内の最小化前サイズ）→ なければクッキーから復元
                 debugOverlay.style.width  = savedOverlayWidth  || (savedWidth  !== null ? savedWidth  + "px" : "270px");
                 debugOverlay.style.height = savedOverlayHeight || (savedHeight !== null ? savedHeight + "px" : "");
                 saveDebugState();
             });
 
+            // --- タイトルバーダブルクリック：最大化 / 最大化解除 ---
+            let savedMaxWidth = "", savedMaxHeight = "", savedMaxLeft = "", savedMaxTop = "";
+            debugTitleBar.addEventListener("dblclick", (e: MouseEvent) => {
+                if ((e.target as HTMLElement).tagName === "BUTTON") return;
+                if (debugOverlay.classList.contains("minimized")) {
+                    // 最小化中はダブルクリックで復元
+                    debugRestBtn.click();
+                    return;
+                }
+                if (!isMaximized) {
+                    // 通常 → 最大化
+                    savedMaxWidth  = debugOverlay.style.width;
+                    savedMaxHeight = debugOverlay.style.height;
+                    savedMaxLeft   = debugOverlay.style.left;
+                    savedMaxTop    = debugOverlay.style.top;
+                    debugOverlay.style.width  = (window.innerWidth  - 30) + "px";
+                    debugOverlay.style.height = (window.innerHeight - 30) + "px";
+                    debugOverlay.style.left   = "15px";
+                    debugOverlay.style.top    = "15px";
+                    isMaximized = true;
+                } else {
+                    // 最大化 → 通常に戻す
+                    debugOverlay.style.width  = savedMaxWidth  || (savedWidth  !== null ? savedWidth  + "px" : "270px");
+                    debugOverlay.style.height = savedMaxHeight || (savedHeight !== null ? savedHeight + "px" : "");
+                    debugOverlay.style.left   = savedMaxLeft   || (savedLeft   !== null ? savedLeft   + "px" : "");
+                    debugOverlay.style.top    = savedMaxTop    || (savedTop    !== null ? savedTop    + "px" : "15px");
+                    isMaximized = false;
+                    saveDebugState();
+                }
+            });
+
             // --- リサイズ監視（overlayのresizeハンドルを監視）---
             const resizeObserver = new ResizeObserver(() => {
-                if (!debugOverlay.classList.contains("minimized")) saveDebugState();
+                if (!debugOverlay.classList.contains("minimized") && !isMaximized) saveDebugState();
             });
             resizeObserver.observe(debugOverlay);
         }
