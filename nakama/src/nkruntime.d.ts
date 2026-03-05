@@ -9,7 +9,15 @@ declare namespace nkruntime {
         warn(msg: string, ...args: unknown[]): void;
         error(msg: string, ...args: unknown[]): void;
     }
-    interface Nakama {}
+    interface Stream {
+        mode: number;
+        subject?: string;
+        subcontext?: string;
+        label?: string;
+    }
+    interface Nakama {
+        streamCount(stream: Stream): number;
+    }
     interface Initializer {
         registerRpc(id: string, fn: RpcFunction): void;
     }

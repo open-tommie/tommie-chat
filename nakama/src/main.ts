@@ -1,13 +1,21 @@
+var serverUpTime = new Date().toISOString();
+
+// チャットルーム "world" (type=Room) のストリーム定数
+var STREAM_MODE_CHANNEL = 2;
+var CHAT_ROOM_LABEL = "world";
+
 function rpcGetServerInfo(
     ctx: nkruntime.Context,
     _logger: nkruntime.Logger,
-    _nk: nkruntime.Nakama,
+    nk: nkruntime.Nakama,
     _payload: string
 ): string {
+    var playerCount = nk.streamCount({ mode: STREAM_MODE_CHANNEL, label: CHAT_ROOM_LABEL });
     var info = {
         name: ctx.node || "nakama",
         version: (ctx.env && ctx.env["NAKAMA_VERSION"]) || "unknown",
-        serverTime: new Date().toISOString(),
+        serverUpTime: serverUpTime,
+        playerCount: playerCount,
     };
     return JSON.stringify(info);
 }

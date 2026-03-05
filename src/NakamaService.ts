@@ -80,11 +80,21 @@ export class NakamaService {
             if (result?.payload) {
                 const raw = typeof result.payload === "string"
                     ? result.payload : JSON.stringify(result.payload);
-                const data = JSON.parse(raw) as { name?: string; version?: string; serverTime?: string };
+                const data = JSON.parse(raw) as { name?: string; version?: string; serverUpTime?: string; playerCount?: number };
+                const toJst = (iso: string) => {
+                    const d = new Date(iso);
+                    const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+                    const pad = (n: number) => String(n).padStart(2, "0");
+                    const ms = String(jst.getUTCMilliseconds()).padStart(3, "0");
+                    return `${jst.getUTCFullYear()}-${pad(jst.getUTCMonth()+1)}-${pad(jst.getUTCDate())}T${pad(jst.getUTCHours())}:${pad(jst.getUTCMinutes())}:${pad(jst.getUTCSeconds())}.${ms}+09:00`;
+                };
                 const parts: string[] = [];
-                if (data.name)    parts.push(data.name);
-                if (data.version) parts.push(`v${data.version}`);
-                if (data.serverTime) parts.push(data.serverTime);
+                if (data.name || data.version)
+                    parts.push(`NakamaServerName="${[data.name, data.version ? `v${data.version}` : ""].filter(Boolean).join(" ")}"`);
+                if (data.serverUpTime)
+                    parts.push(`serverUpTime=${toJst(data.serverUpTime)}`);
+                if (data.playerCount !== undefined)
+                    parts.push(`players=${data.playerCount}`);
                 if (parts.length) return parts.join(" ");
             }
         } catch { /* RPC 未登録時はフォールバック */ }

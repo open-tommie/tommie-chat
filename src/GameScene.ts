@@ -578,7 +578,7 @@ export class GameScene {
             entry.className = "server-log-entry";
             entry.textContent = hint
                 ? `${ts} ${label} : ${hint} URL="${host}:${port}" ${detail}`.trimEnd()
-                : `${ts} ${label} URL=${host}:${port}` + (detail ? ` ${detail}` : "");
+                : `${ts} ${label} URL="${host}:${port}"` + (detail ? ` ${detail}` : "");
             list.appendChild(entry);
             list.scrollTop = list.scrollHeight;
         };
@@ -604,7 +604,7 @@ export class GameScene {
             try {
                 await this.nakama.login(name, host, port);
                 const srvInfo = await this.nakama.getServerInfo();
-                addServerLog(host, port, "ログイン成功", `サーバ: ${srvInfo}`);
+                addServerLog(host, port, "ログイン成功", srvInfo);
                 if (loginStatus) {
                     loginStatus.style.color = "#00dd55";
                     loginStatus.textContent = "✔ログイン済み";
