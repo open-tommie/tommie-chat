@@ -143,6 +143,9 @@ export class GameScene {
     }
 
     private setupHtmlUI(): void {
+        // フラッシュガード CSS を削除（JS側のインラインスタイルで制御するため）
+        document.getElementById("panel-flash-guard")?.remove();
+
         const textarea = document.getElementById("chatInput") as HTMLTextAreaElement;
         const sendBtn = document.getElementById("sendBtn") as HTMLButtonElement;
         const clearBtn = document.getElementById("clearBtn") as HTMLButtonElement;
@@ -1644,10 +1647,24 @@ export class GameScene {
             });
 
             cookieReset.addEventListener("click", () => {
+                // 全パネルを非表示にしてからリロード
+                ["server-settings-panel", "server-log-panel", "user-list-panel",
+                 "chat-history-panel", "debug-overlay"].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = "none";
+                });
+                // 全クッキー削除
                 document.cookie.split(";").forEach(c => {
                     const name = c.trim().split("=")[0];
                     if (name) document.cookie = `${name}=;path=/;max-age=0`;
                 });
+                // リロード後もパネルが非表示になるようクッキーをセット
+                const maxAge = `path=/;max-age=${60 * 60 * 24 * 365}`;
+                document.cookie = `showSrvSettings=0;${maxAge}`;
+                document.cookie = `showSrvLog=0;${maxAge}`;
+                document.cookie = `showUserList=0;${maxAge}`;
+                document.cookie = `showChatHist=0;${maxAge}`;
+                document.cookie = `showDebug=0;${maxAge}`;
                 location.reload();
             });
 

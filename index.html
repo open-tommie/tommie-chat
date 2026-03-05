@@ -582,6 +582,30 @@
             background: rgba(255, 255, 255, 0.15);
         }
     </style>
+    <script>
+        // クッキーが非表示設定のパネルをDOMレンダリング前にCSSで隠す（フラッシュ防止）
+        (function() {
+            var map = [
+                ["showSrvSettings", "server-settings-panel"],
+                ["showSrvLog",      "server-log-panel"],
+                ["showUserList",    "user-list-panel"],
+                ["showChatHist",    "chat-history-panel"],
+                ["showDebug",       "debug-overlay"]
+            ];
+            var getCookie = function(name) {
+                var m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+                return m ? decodeURIComponent(m[1]) : null;
+            };
+            var rules = map.filter(function(p) { return getCookie(p[0]) === "0"; })
+                           .map(function(p) { return "#" + p[1] + "{display:none}"; });
+            if (rules.length) {
+                var style = document.createElement("style");
+                style.id = "panel-flash-guard";
+                style.textContent = rules.join("");
+                document.head.appendChild(style);
+            }
+        })();
+    </script>
 </head>
 <body>
     <canvas id="renderCanvas"></canvas>
@@ -769,7 +793,7 @@
         <button class="menu-item" id="menu-chathistory">✓ チャット履歴</button>
         <button class="menu-item" id="menu-debug">✓ デバッグツール</button>
         <hr style="margin:4px 0;border-color:rgba(255,255,255,0.2);">
-        <button class="menu-item" id="menu-cookie-reset">クッキーリセット</button>
+        <button class="menu-item" id="menu-cookie-reset">全パネル非表示（クッキー初期化）</button>
     </div>
 
     <div id="chat-container">
