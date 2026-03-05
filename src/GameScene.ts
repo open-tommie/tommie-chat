@@ -488,13 +488,13 @@ export class GameScene {
 
         const relativeTime = (ts: number): string => {
             const secs = Math.floor((Date.now() - ts) / 1000);
-            if (secs < 60) return `${secs}秒前`;
+            if (secs < 60) return `${secs}秒`;
             const mins = Math.floor(secs / 60);
-            if (mins < 60) return `${mins}分前`;
+            if (mins < 60) return `${mins}分`;
             const hours = Math.floor(mins / 60);
             const remMins = mins % 60;
-            if (hours < 24) return remMins > 0 ? `${hours}時間${remMins}分前` : `${hours}時間前`;
-            return `${Math.floor(hours / 24)}日前`;
+            if (hours < 24) return remMins > 0 ? `${hours}時間${remMins}分` : `${hours}時間`;
+            return `${Math.floor(hours / 24)}日`;
         };
 
         const renderUserList = () => {
