@@ -1,0 +1,11 @@
+{
+  "name": "nakama-server",
+  "private": true,
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.0.0"
+  }
+}

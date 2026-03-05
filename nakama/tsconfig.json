@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES5",
+    "lib": ["ES5", "ES2015.Promise"],
+    "module": "none",
+    "strict": false,
+    "skipLibCheck": true,
+    "rootDir": "src",
+    "outFile": "modules/main.js"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["../node_modules"]
+}

@@ -98,3 +98,6 @@ Thumbs.db
 # Database volumes and local data (if you mapped data to a local directory)
 data/
 !data/modules/ # モジュールのソースコードディレクトリは除外しない（構成による）
+
+nakama/modules/main.js
+nakama/node_modules/

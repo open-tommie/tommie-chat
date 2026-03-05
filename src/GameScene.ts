@@ -603,7 +603,8 @@ export class GameScene {
             if (loginBtn)    loginBtn.disabled = true;
             try {
                 await this.nakama.login(name, host, port);
-                addServerLog(host, port, "ログイン成功");
+                const srvInfo = await this.nakama.getServerInfo();
+                addServerLog(host, port, "ログイン成功", `サーバ: ${srvInfo}`);
                 if (loginStatus) {
                     loginStatus.style.color = "#00dd55";
                     loginStatus.textContent = "✔ログイン済み";

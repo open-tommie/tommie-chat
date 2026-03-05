@@ -8,6 +8,8 @@ export class NakamaService {
     private session: Session | null = null;
     private socket: Socket | null = null;
     private channelId: string | null = null;
+    private host = "127.0.0.1";
+    private port = "7350";
 
     onChatMessage?: (username: string, text: string) => void;
     onPresenceJoin?: (userId: string, username: string) => void;
@@ -19,6 +21,8 @@ export class NakamaService {
     }
 
     async login(loginName: string, host = "127.0.0.1", port = "7350"): Promise<Session> {
+        this.host = host;
+        this.port = port;
         this.client = new Client("defaultkey", host, port, false);
         this.session = await this.client.authenticateCustom(loginName, true, loginName);
 
@@ -66,6 +70,39 @@ export class NakamaService {
 
     getSession(): Session | null {
         return this.session;
+    }
+
+    async getServerInfo(): Promise<string> {
+        if (!this.session) return "不明";
+        // ① カスタム RPC "getServerInfo"
+        try {
+            const result = await this.client.rpc(this.session, "getServerInfo", "" as unknown as object);
+            if (result?.payload) {
+                const raw = typeof result.payload === "string"
+                    ? result.payload : JSON.stringify(result.payload);
+                const data = JSON.parse(raw) as { name?: string; version?: string; serverTime?: string };
+                const parts: string[] = [];
+                if (data.name)    parts.push(data.name);
+                if (data.version) parts.push(`v${data.version}`);
+                if (data.serverTime) parts.push(data.serverTime);
+                if (parts.length) return parts.join(" ");
+            }
+        } catch { /* RPC 未登録時はフォールバック */ }
+        // ② /v2/serverinfo (Nakama 3.x+)
+        const proto = "http";
+        const base = `${proto}://${this.host}:${this.port}`;
+        try {
+            const res = await fetch(`${base}/v2/serverinfo`, {
+                headers: { "Authorization": `Bearer ${this.session.token}` }
+            });
+            const text = await res.text();
+            if (res.ok && text) {
+                const data = JSON.parse(text) as { version?: string; name?: string };
+                const parts = [data.name, data.version].filter(Boolean);
+                if (parts.length) return parts.join(" ");
+            }
+        } catch { /* ignore */ }
+        return "不明";
     }
 
     private async storeLoginTime(): Promise<void> {
