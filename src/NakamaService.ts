@@ -10,11 +10,12 @@ export class NakamaService {
     private channelId: string | null = null;
     private host = "127.0.0.1";
     private port = "7350";
+    selfSessionId: string | null = null;
 
     onChatMessage?: (username: string, text: string) => void;
-    onPresenceJoin?: (userId: string, username: string) => void;
-    onPresenceNewJoin?: (userId: string, username: string) => void;
-    onPresenceLeave?: (userId: string, username: string) => void;
+    onPresenceJoin?: (sessionId: string, userId: string, username: string) => void;
+    onPresenceNewJoin?: (sessionId: string, userId: string, username: string) => void;
+    onPresenceLeave?: (sessionId: string, userId: string, username: string) => void;
 
     constructor(host = "127.0.0.1", port = "7350", useSSL = false) {
         this.client = new Client("defaultkey", host, port, useSSL);
@@ -34,21 +35,28 @@ export class NakamaService {
             if (content?.text) this.onChatMessage?.(msg.username ?? "", content.text);
         };
 
-        await this.storeLoginTime();
-
         const ch: Channel = await this.socket.joinChat(CHAT_ROOM, CHAT_TYPE, true, false);
         this.channelId = ch.id;
 
+        // ch.self.session_id は他ユーザのプレゼンスに見える session_id と一致する
+        const selfSessionId = ch.self?.session_id ?? "";
+        this.selfSessionId = selfSessionId;
+        try { await this.storeLoginTime(selfSessionId); } catch { /* ignore */ }
+
+        // 自分自身を先に追加（ch.presences には自分が含まれない）
+        if (ch.self) {
+            this.onPresenceJoin?.(selfSessionId, ch.self.user_id, ch.self.username);
+        }
         for (const p of ch.presences ?? []) {
-            this.onPresenceJoin?.(p.user_id, p.username);
+            this.onPresenceJoin?.(p.session_id ?? "", p.user_id, p.username);
         }
 
         this.socket.onchannelpresence = (event: ChannelPresenceEvent) => {
             for (const p of event.joins ?? []) {
-                this.onPresenceJoin?.(p.user_id, p.username);
-                this.onPresenceNewJoin?.(p.user_id, p.username);
+                this.onPresenceJoin?.(p.session_id ?? "", p.user_id, p.username);
+                this.onPresenceNewJoin?.(p.session_id ?? "", p.user_id, p.username);
             }
-            for (const p of event.leaves ?? []) this.onPresenceLeave?.(p.user_id, p.username);
+            for (const p of event.leaves ?? []) this.onPresenceLeave?.(p.session_id ?? "", p.user_id, p.username);
         };
 
         return this.session;
@@ -64,8 +72,9 @@ export class NakamaService {
             this.socket.disconnect(true);
             this.socket = null;
         }
-        this.session   = null;
-        this.channelId = null;
+        this.session       = null;
+        this.channelId     = null;
+        this.selfSessionId = null;
     }
 
     getSession(): Session | null {
@@ -115,22 +124,22 @@ export class NakamaService {
         return "不明";
     }
 
-    private async storeLoginTime(): Promise<void> {
+    private async storeLoginTime(sessionId: string): Promise<void> {
         if (!this.session) return;
         await this.client.writeStorageObjects(this.session, [{
             collection: "user_status",
-            key: "login_time",
+            key: `login_time_${sessionId}`,
             value: { loginTime: new Date().toISOString() },
             permission_read: 2,
             permission_write: 1,
         }]);
     }
 
-    async getUserLoginTime(userId: string): Promise<string | null> {
+    async getSessionLoginTime(userId: string, sessionId: string): Promise<string | null> {
         if (!this.session) return null;
         try {
             const result = await this.client.readStorageObjects(this.session, {
-                object_ids: [{ collection: "user_status", key: "login_time", user_id: userId }]
+                object_ids: [{ collection: "user_status", key: `login_time_${sessionId}`, user_id: userId }]
             });
             const obj = result.objects?.[0];
             if (obj?.value) {

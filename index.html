@@ -140,6 +140,15 @@
             font-size: 9px;
             opacity: 0.7;
         }
+        #user-list tbody td.uuid-cell {
+            font-size: 10px;
+            color: #666;
+            max-width: 80px;
+        }
+        #user-list tbody td.ul-self {
+            font-weight: bold;
+        }
+        #ul-th-user { width: 60px; }
         #user-list tbody td {
             padding: 2px 6px;
             border-bottom: 1px dotted rgba(0,0,0,0.1);
@@ -729,7 +738,10 @@
             <table id="user-list">
                 <thead>
                     <tr>
-                        <th id="ul-th-user">ユーザID</th>
+                        <th id="ul-th-user">Username</th>
+                        <th id="ul-th-uuid">UserID</th>
+                        <th id="ul-th-sid">SessionID</th>
+                        <th id="ul-th-rel">相対時刻</th>
                         <th id="ul-th-time">ログイン時刻</th>
                     </tr>
                 </thead>

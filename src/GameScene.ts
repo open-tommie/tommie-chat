@@ -476,65 +476,94 @@ export class GameScene {
                  + `${p2(date.getHours())}:${p2(date.getMinutes())}:${p2(date.getSeconds())}${tz}`;
         };
 
-        const userMap = new Map<string, { username: string; loginTime: string }>();
-        let ulSortKey: "username" | "loginTime" = "username";
+        const userMap = new Map<string, { username: string; uuid: string; sessionId: string; loginTimestamp: number; loginTime: string }>();
+        type UlSortKey = "username" | "uuid" | "sessionId" | "loginTime" | "loginTimestamp";
+        let ulSortKey: UlSortKey = "username";
         let ulSortAsc = true;
         const thUser = document.getElementById("ul-th-user") as HTMLTableCellElement;
+        const thUuid = document.getElementById("ul-th-uuid") as HTMLTableCellElement;
+        const thSid  = document.getElementById("ul-th-sid")  as HTMLTableCellElement;
         const thTime = document.getElementById("ul-th-time") as HTMLTableCellElement;
+        const thRel  = document.getElementById("ul-th-rel")  as HTMLTableCellElement;
+
+        const relativeTime = (ts: number): string => {
+            const secs = Math.floor((Date.now() - ts) / 1000);
+            if (secs < 60) return `${secs}秒前`;
+            const mins = Math.floor(secs / 60);
+            if (mins < 60) return `${mins}分前`;
+            const hours = Math.floor(mins / 60);
+            const remMins = mins % 60;
+            if (hours < 24) return remMins > 0 ? `${hours}時間${remMins}分前` : `${hours}時間前`;
+            return `${Math.floor(hours / 24)}日前`;
+        };
 
         const renderUserList = () => {
             if (!userListBody) return;
             userListBody.innerHTML = "";
             const entries = [...userMap.values()].sort((a, b) => {
-                const va = a[ulSortKey], vb = b[ulSortKey];
+                if (ulSortKey === "loginTimestamp")
+                    return ulSortAsc ? a.loginTimestamp - b.loginTimestamp : b.loginTimestamp - a.loginTimestamp;
+                const va = a[ulSortKey as "username" | "uuid" | "sessionId" | "loginTime"] ?? "";
+                const vb = b[ulSortKey as "username" | "uuid" | "sessionId" | "loginTime"] ?? "";
                 return ulSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
             });
-            for (const { username, loginTime } of entries) {
+            const arrow = ulSortAsc ? "▲" : "▼";
+            if (thUser) thUser.dataset.sort = ulSortKey === "username"        ? arrow : "";
+            if (thUuid) thUuid.dataset.sort = ulSortKey === "uuid"            ? arrow : "";
+            if (thSid)  thSid.dataset.sort  = ulSortKey === "sessionId"       ? arrow : "";
+            if (thTime) thTime.dataset.sort = ulSortKey === "loginTime"       ? arrow : "";
+            if (thRel)  thRel.dataset.sort  = ulSortKey === "loginTimestamp"  ? arrow : "";
+            const myId = this.nakama.selfSessionId ?? "";
+            for (const { username, uuid, sessionId, loginTimestamp, loginTime } of entries) {
                 const tr = document.createElement("tr");
-                tr.innerHTML = `<td>${username}</td><td>${loginTime}</td>`;
+                const bold = sessionId === myId ? " class=\"ul-self\"" : "";
+                tr.innerHTML = `<td${bold}>${username}</td><td class="uuid-cell">${uuid}</td><td class="uuid-cell">${sessionId}</td><td>${relativeTime(loginTimestamp)}</td><td>${loginTime}</td>`;
                 userListBody.appendChild(tr);
             }
-            const arrow = ulSortAsc ? "▲" : "▼";
-            if (thUser) thUser.dataset.sort = ulSortKey === "username" ? arrow : "";
-            if (thTime) thTime.dataset.sort = ulSortKey === "loginTime" ? arrow : "";
         };
 
-        if (thUser) thUser.addEventListener("click", () => {
-            if (ulSortKey === "username") ulSortAsc = !ulSortAsc;
-            else { ulSortKey = "username"; ulSortAsc = true; }
+        const setUlSort = (key: UlSortKey) => {
+            if (ulSortKey === key) ulSortAsc = !ulSortAsc;
+            else { ulSortKey = key; ulSortAsc = true; }
             renderUserList();
-        });
-        if (thTime) thTime.addEventListener("click", () => {
-            if (ulSortKey === "loginTime") ulSortAsc = !ulSortAsc;
-            else { ulSortKey = "loginTime"; ulSortAsc = true; }
-            renderUserList();
-        });
-        const fetchAndSetLoginTime = async (userId: string, username: string) => {
-            const isoStr = await this.nakama.getUserLoginTime(userId);
-            const loginTime = formatTimestamp(isoStr ? new Date(isoStr) : new Date());
-            userMap.set(userId, { username, loginTime });
-            renderUserList();
+        };
+        if (thUser) thUser.addEventListener("click", () => setUlSort("username"));
+        if (thUuid) thUuid.addEventListener("click", () => setUlSort("uuid"));
+        if (thSid)  thSid.addEventListener("click",  () => setUlSort("sessionId"));
+        if (thTime) thTime.addEventListener("click", () => setUlSort("loginTime"));
+        if (thRel)  thRel.addEventListener("click",  () => setUlSort("loginTimestamp"));
+
+        setInterval(renderUserList, 10000);
+
+        const fetchAndSetLoginTime = async (sessionId: string, userId: string, username: string) => {
+            const isoStr = await this.nakama.getSessionLoginTime(userId, sessionId);
+            const loginDate = isoStr ? new Date(isoStr) : new Date();
+            const existing = userMap.get(sessionId);
+            if (existing) {
+                userMap.set(sessionId, { ...existing, loginTime: formatTimestamp(loginDate), loginTimestamp: loginDate.getTime() });
+                renderUserList();
+            }
         };
 
         // Nakama コールバック設定
         this.nakama.onChatMessage = (username, text) => {
             addChatHistory(username, text);
         };
-        this.nakama.onPresenceJoin = (userId, username) => {
-            userMap.set(userId, { username, loginTime: "…" });
+        this.nakama.onPresenceJoin = (sessionId, userId, username) => {
+            userMap.set(sessionId, { username, uuid: userId, sessionId, loginTimestamp: Date.now(), loginTime: "…" });
             renderUserList();
-            fetchAndSetLoginTime(userId, username);
+            fetchAndSetLoginTime(sessionId, userId, username);
         };
-        this.nakama.onPresenceNewJoin = (userId, username) => {
-            userMap.set(userId, { username, loginTime: "…" });
+        this.nakama.onPresenceNewJoin = (sessionId, userId, username) => {
+            userMap.set(sessionId, { username, uuid: userId, sessionId, loginTimestamp: Date.now(), loginTime: "…" });
             renderUserList();
-            fetchAndSetLoginTime(userId, username);
+            fetchAndSetLoginTime(sessionId, userId, username);
             addChatHistory("[system]", `${username}がログインしました。`);
         };
-        this.nakama.onPresenceLeave = (userId, username) => {
-            userMap.delete(userId);
+        this.nakama.onPresenceLeave = (sessionId, _userId, uname) => {
+            userMap.delete(sessionId);
             renderUserList();
-            addChatHistory("[system]", `${username}がログアウトしました。`);
+            addChatHistory("[system]", `${uname}がログアウトしました。`);
         };
 
         const setLoginMode = () => {
@@ -975,6 +1004,7 @@ export class GameScene {
                 return; 
             }
 
+            if (!e.key) return;
             const key = e.key.toLowerCase();
             this.inputMap[key] = true;
             
@@ -985,6 +1015,7 @@ export class GameScene {
         });
 
         window.addEventListener("keyup", (e) => {
+            if (!e.key) return;
             const key = e.key.toLowerCase();
             this.inputMap[key] = false;
         });
