@@ -855,6 +855,30 @@ export class GameScene {
             meshesToMerge.push(layerMesh);
         }
 
+        // X字型の対角プレーン（横から見たときの厚みを演出）
+        const diagMat = new StandardMaterial(name + "_diagMat", this.scene);
+        diagMat.diffuseTexture = tex;
+        diagMat.useAlphaFromDiffuseTexture = true;
+        diagMat.backFaceCulling = false;
+        diagMat.specularColor = new Color3(0.5, 0.5, 0.5);
+        diagMat.specularPower = 64;
+        diagMat.emissiveColor = new Color3(0.1, 0.1, 0.1);
+
+        // 横から見たときの広がりが depth に一致する角度: asin(depth / width)
+        const diagAngle = Math.asin(depth / width);
+
+        const diagMesh1 = MeshBuilder.CreatePlane(name + "_diag1", { width, height, updatable: true }, this.scene);
+        diagMesh1.rotation.y = diagAngle;
+        diagMesh1.material = diagMat;
+        applyCustomUVs(diagMesh1, normalUVs);
+        meshesToMerge.push(diagMesh1);
+
+        const diagMesh2 = MeshBuilder.CreatePlane(name + "_diag2", { width, height, updatable: true }, this.scene);
+        diagMesh2.rotation.y = -diagAngle;
+        diagMesh2.material = diagMat;
+        applyCustomUVs(diagMesh2, normalUVs);
+        meshesToMerge.push(diagMesh2);
+
         const mergedAvatar = Mesh.MergeMeshes(meshesToMerge, true, true, undefined, false, true) as Mesh;
         mergedAvatar.name = name;
 
