@@ -19,7 +19,7 @@ export class NakamaService {
     onPresenceJoin?: (sessionId: string, userId: string, username: string) => void;
     onPresenceNewJoin?: (sessionId: string, userId: string, username: string) => void;
     onPresenceLeave?: (sessionId: string, userId: string, username: string) => void;
-    onAvatarInitPos?:    (sessionId: string, x: number, z: number) => void;
+    onAvatarInitPos?:    (sessionId: string, x: number, z: number, ry: number) => void;
     onAvatarMoveTarget?: (sessionId: string, x: number, z: number) => void;
 
     constructor(host = "127.0.0.1", port = "7350", useSSL = false) {
@@ -82,9 +82,9 @@ export class NakamaService {
                 if (!sid) return;
                 if (md.op_code === OP_INIT_POS || md.op_code === OP_MOVE_TARGET) {
                     try {
-                        const pos = JSON.parse(new TextDecoder().decode(md.data)) as { x: number; z: number };
+                        const pos = JSON.parse(new TextDecoder().decode(md.data)) as { x: number; z: number; ry?: number };
                         if (md.op_code === OP_INIT_POS)
-                            this.onAvatarInitPos?.(sid, pos.x, pos.z);
+                            this.onAvatarInitPos?.(sid, pos.x, pos.z, pos.ry ?? 0);
                         else
                             this.onAvatarMoveTarget?.(sid, pos.x, pos.z);
                     } catch { /* ignore */ }
@@ -95,10 +95,10 @@ export class NakamaService {
         }
     }
 
-    async sendInitPos(x: number, z: number): Promise<void> {
+    async sendInitPos(x: number, z: number, ry = 0): Promise<void> {
         if (!this.socket || !this.matchId) return;
         try {
-            await this.socket.sendMatchState(this.matchId, OP_INIT_POS, JSON.stringify({ x, z }));
+            await this.socket.sendMatchState(this.matchId, OP_INIT_POS, JSON.stringify({ x, z, ry }));
         } catch { /* ignore */ }
     }
 

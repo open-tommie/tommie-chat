@@ -551,9 +551,10 @@ export class GameScene {
         this.nakama.onChatMessage = (username, text) => {
             addChatHistory(username, text);
         };
-        this.nakama.onAvatarInitPos = (sessionId: string, x: number, z: number) => {
+        this.nakama.onAvatarInitPos = (sessionId: string, x: number, z: number, ry: number) => {
             const av = this.remoteAvatars.get(sessionId);
-            if (av) { av.position.x = x; av.position.z = z; }
+            if (av) { av.position.x = x; av.position.z = z; av.rotation.y = ry; }
+            this.remoteTargets.delete(sessionId);
         };
         this.nakama.onAvatarMoveTarget = (sessionId: string, x: number, z: number) => {
             if (this.remoteAvatars.has(sessionId)) this.remoteTargets.set(sessionId, { x, z });
@@ -564,7 +565,12 @@ export class GameScene {
             if (this.remoteAvatars.has(sessionId)) return;
             const x = (Math.random() - 0.5) * 14;
             const z = (Math.random() - 0.5) * 14;
-            const av = this.createAvatar("remote_" + sessionId, "/textures/pic2.ktx2", x, z);
+            const avName = "remote_" + sessionId;
+            const av = this.createAvatar(avName, "/textures/pic1.ktx2", x, z);
+            const standBase = av.getChildMeshes().find(m => m.name === avName + "_standBase");
+            if (standBase && standBase.material) {
+                (standBase.material as StandardMaterial).diffuseColor = new Color3(0.4, 0.7, 1.0);
+            }
             this.createNameTag(av, username);
             this.remoteAvatars.set(sessionId, av);
         };
@@ -589,7 +595,7 @@ export class GameScene {
             addChatHistory("[system]", `${username}がログインしました。`);
             addRemoteAvatar(sessionId, username);
             // 新規参加者へ自分の現在位置を通知
-            { const p = this.playerBox.position; this.nakama.sendInitPos(p.x, p.z).catch(() => {}); }
+            { const p = this.playerBox; this.nakama.sendInitPos(p.position.x, p.position.z, p.rotation.y).catch(() => {}); }
         };
         this.nakama.onPresenceLeave = (sessionId, _userId, uname) => {
             userMap.delete(sessionId);
@@ -666,7 +672,7 @@ export class GameScene {
                 await this.nakama.login(name, host, port);
                 await this.nakama.joinWorldMatch();
                 // 自分の初期位置を全員へ送信
-                { const p = this.playerBox.position; this.nakama.sendInitPos(p.x, p.z).catch(() => {}); }
+                { const p = this.playerBox; this.nakama.sendInitPos(p.position.x, p.position.z, p.rotation.y).catch(() => {}); }
                 const srvInfo = await this.nakama.getServerInfo();
                 addServerLog(host, port, "ログイン成功", srvInfo);
                 if (loginStatus) {
@@ -965,7 +971,7 @@ export class GameScene {
 
         const playerStandBase = this.playerBox.getChildMeshes().find(m => m.name === "tommie.jp_standBase");
         if (playerStandBase && playerStandBase.material) {
-            (playerStandBase.material as StandardMaterial).diffuseColor = new Color3(1.0, 0.4, 0.7);
+            (playerStandBase.material as StandardMaterial).diffuseColor = new Color3(1.0, 0.0, 0.0);
         }
 
         const player2 = this.createAvatar("npc001", "/textures/pic2.ktx2", 0, 3);
@@ -1766,10 +1772,11 @@ export class GameScene {
                 this.playerBox.position.set(0, 0, 0);
                 this.playerBox.rotation.y = 0;
                 this.targetPosition = null;
+                this.nakama.sendInitPos(0, 0).catch(() => {});
 
-                this.camera.alpha = Math.PI / 2; 
-                this.camera.beta = Math.PI / 4;  
-                this.camera.radius = 10.0;       
+                this.camera.alpha = Math.PI / 2;
+                this.camera.beta = Math.PI / 4;
+                this.camera.radius = 10.0;
             });
         }
 
