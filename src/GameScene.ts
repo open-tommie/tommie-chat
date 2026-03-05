@@ -2,7 +2,6 @@ import {
     Engine, 
     Scene, 
     Vector3, 
-    Vector4,
     Color4,
     MeshBuilder, 
     HemisphericLight,
@@ -12,7 +11,6 @@ import {
     Color3,
     Mesh,
     Texture,
-    TransformNode,
     SceneInstrumentation,
     EngineInstrumentation,
     PointerEventTypes,
@@ -178,6 +176,7 @@ export class GameScene {
             if (savedTop    !== null) historyPanel.style.top    = savedTop    + "px";
             if (savedWidth  !== null) historyPanel.style.width  = savedWidth  + "px";
             if (savedHeight !== null) historyPanel.style.height = savedHeight + "px";
+            this.clampToViewport(historyPanel);
 
             let isDragging = false;
             let dragOffsetX = 0;
@@ -246,6 +245,7 @@ export class GameScene {
                 const savedH = gCookieFn("ulHeight");
                 if (savedL !== null) { ulPanel.style.left = savedL + "px"; ulPanel.style.right = "auto"; }
                 if (savedT !== null)   ulPanel.style.top  = savedT + "px";
+                this.clampToViewport(ulPanel);
 
                 if (savedW !== null) ulPanel.style.width  = savedW + "px";
                 if (savedH !== null) ulPanel.style.height = savedH + "px";
@@ -324,6 +324,7 @@ export class GameScene {
                 const savedT = gCk("srvTop");
                 if (savedL !== null) { srvPanel.style.left = savedL + "px"; srvPanel.style.right = "auto"; }
                 if (savedT !== null)   srvPanel.style.top  = savedT + "px";
+                this.clampToViewport(srvPanel);
 
                 // ドラッグ
                 let isDrag = false, offX = 0, offY = 0;
@@ -382,6 +383,7 @@ export class GameScene {
                 if (savedT !== null)   slPanel.style.top   = savedT + "px";
                 if (savedW !== null) slPanel.style.width  = savedW + "px";
                 if (savedH !== null) slPanel.style.height = savedH + "px";
+                this.clampToViewport(slPanel);
 
                 let isDrag = false, offX = 0, offY = 0;
                 slHeader.addEventListener("mousedown", (e: MouseEvent) => {
@@ -534,7 +536,7 @@ export class GameScene {
 
         setInterval(renderUserList, 10000);
 
-        const fetchAndSetLoginTime = async (sessionId: string, userId: string, username: string) => {
+        const fetchAndSetLoginTime = async (sessionId: string, userId: string, _username: string) => {
             const isoStr = await this.nakama.getSessionLoginTime(userId, sessionId);
             const loginDate = isoStr ? new Date(isoStr) : new Date();
             const existing = userMap.get(sessionId);
@@ -1058,7 +1060,6 @@ export class GameScene {
 
         const getNpcMessage = (label: string) => {
             const now = new Date();
-            const hh = String(now.getHours()).padStart(2, "0");
             const mm = String(now.getMinutes()).padStart(2, "0");
             const ss = String(now.getSeconds()).padStart(2, "0");
             return `${label}時刻の分秒は${mm}:${ss}です！`;
@@ -1581,18 +1582,11 @@ export class GameScene {
             let savedOverlayHeight = "";
             let savedOverlayWidth  = "";
             debugMinBtn.addEventListener("click", () => {
-                if (isMaximized) {
-                    savedOverlayWidth  = savedMaxWidth  || (savedWidth  !== null ? savedWidth  + "px" : "270px");
-                    savedOverlayHeight = savedMaxHeight || (savedHeight !== null ? savedHeight + "px" : "");
-                    isMaximized = false;
-                } else {
-                    savedOverlayWidth  = debugOverlay.style.width;
-                    savedOverlayHeight = debugOverlay.style.height;
-                }
-                debugOverlay.style.height = ""; 
-                debugOverlay.style.width  = ""; 
-                debugOverlay.classList.add("minimized");
-                saveDebugState();
+                // パネルを非表示にしてメニュートグルと同期
+                debugOverlay.style.display = "none";
+                document.cookie = `showDebug=${encodeURIComponent("0")};path=/;max-age=${60*60*24*365}`;
+                const menuDebugBtn = document.getElementById("menu-debug");
+                if (menuDebugBtn) menuDebugBtn.textContent = "　 デバッグツール";
             });
             debugRestBtn.addEventListener("click", () => {
                 debugOverlay.classList.remove("minimized");
@@ -1680,6 +1674,7 @@ export class GameScene {
                     e.stopPropagation();
                     const visible = target.style.display !== "none";
                     target.style.display = visible ? "none" : "";
+                    if (!visible) this.clampToViewport(target);
                     btn.textContent = (visible ? "　" : "✓") + " " + label;
                     sCk(cookieKey, visible ? "0" : "1");
                 });
@@ -2007,5 +2002,20 @@ export class GameScene {
 
     private handleResize(): void {
         this.engine.resize(true);
+    }
+
+    private clampToViewport(el: HTMLElement): void {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        // サイズが画面より大きければ縮める
+        const r0 = el.getBoundingClientRect();
+        if (r0.width  > vw) { el.style.width  = vw + "px"; }
+        if (r0.height > vh) { el.style.height = vh + "px"; }
+        // 位置をクランプ（サイズ変更後に再取得）
+        const r = el.getBoundingClientRect();
+        const newLeft = Math.max(0, Math.min(r.left, vw - r.width));
+        const newTop  = Math.max(0, Math.min(r.top,  vh - r.height));
+        if (newLeft !== r.left) { el.style.left = newLeft + "px"; el.style.right = "auto"; }
+        if (newTop  !== r.top)  el.style.top   = newTop  + "px";
     }
 }
