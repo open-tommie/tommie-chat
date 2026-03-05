@@ -56,6 +56,7 @@ export class GameScene {
     private remoteTargets = new Map<string, { x: number; z: number }>();
     private remoteSpeeches = new Map<string, (text: string) => void>();
     private playerTextureUrl = "/textures/pic1.ktx2";
+    private avatarDepth = 0.05;
     private npc001BaseX = 0;
     private npc002BaseX = 1.5;
     private npc002BaseZ = 3;
@@ -807,7 +808,7 @@ export class GameScene {
     private createAvatar(name: string, textureUrl: string, x: number, z: number): Mesh {
         const width = 1.0;
         const height = 1.5;
-        const depth = 0.05;    
+        const depth = this.avatarDepth;
         const layerCount = 5; 
 
         const vTrimStart = 0.02;
@@ -1515,6 +1516,7 @@ export class GameScene {
         const autoChatBtn = document.getElementById("autoChatBtn") as HTMLButtonElement;
         const npcAutoChatBtn = document.getElementById("npcAutoChatBtn") as HTMLButtonElement;
         const npcVisBtn = document.getElementById("npcVisBtn") as HTMLButtonElement;
+        const avatarThickInput = document.getElementById("avatarThickInput") as HTMLInputElement;
 
         const resetViewBtn   = document.getElementById("resetViewBtn")   as HTMLButtonElement;
         const topViewBtn     = document.getElementById("topViewBtn")     as HTMLButtonElement;
@@ -1860,6 +1862,14 @@ export class GameScene {
             });
         }
 
+        if (avatarThickInput) {
+            avatarThickInput.addEventListener("input", () => {
+                const v = Math.max(1, Math.min(50, parseInt(avatarThickInput.value, 10) || 5));
+                this.avatarDepth = v / 100;
+                this.applyAvatarDepth();
+            });
+        }
+
         if (dofBtn) {
             dofBtn.innerText = "Off";
             dofBtn.classList.add("off");
@@ -2019,6 +2029,16 @@ export class GameScene {
 
     private handleResize(): void {
         this.engine.resize(true);
+    }
+
+    private applyAvatarDepth(): void {
+        const scale = this.avatarDepth / 0.05;
+        const avatars = [this.playerBox, this.npc001, this.npc002, this.npc003,
+                         ...this.remoteAvatars.values()];
+        for (const av of avatars) {
+            const body = av.getChildMeshes(false).find(m => m.material instanceof MultiMaterial);
+            if (body) body.scaling.z = scale;
+        }
     }
 
     private clampToViewport(el: HTMLElement): void {

@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>tommieChat 0.0.13</title>
+    <title>tommieChat</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #87ceeb; }
         canvas { width: 100vw; height: 100vh; display: block; touch-action: none; }
@@ -583,6 +583,40 @@
         }
     </style>
     <script>
+        // アプリバージョン・更新日の定数（ここだけ変更する）
+        var APP_VERSION = "0.0.13";
+        var APP_DATE    = "2026/03/06";
+
+        document.title = "tommieChat " + APP_VERSION;
+
+        document.addEventListener("DOMContentLoaded", function() {
+            var el;
+            el = document.getElementById("val-ver");
+            if (el) el.textContent = APP_VERSION;
+
+            el = document.getElementById("val-update");
+            if (el) el.textContent = APP_DATE;
+
+            el = document.getElementById("app-footer-version");
+            if (el) {
+                var dateDot = APP_DATE.replace(/\//g, ".");
+                el.innerHTML =
+                    '<div style="color:#000;">tommieChat ' + APP_VERSION + ' // ' + dateDot + '</div>' +
+                    '<div style="color:#000;">Architect: tommie.jp, AI: Claude/Gemini/Grok</div>';
+            }
+
+            el = document.getElementById("label-ver");
+            if (el) el.setAttribute("title",
+                "01.Ver\nアプリケーションバージョン番号\n初期値: " + APP_VERSION +
+                "\n典型的なMMO: 定期更新あり\nMinecraft: Java 1.21.x, 定期スナップショット更新");
+
+            el = document.getElementById("label-update");
+            if (el) el.setAttribute("title",
+                "02.Update\n最終更新日\n初期値: " + APP_DATE +
+                "\n典型的なMMO: 週〜月単位で更新\nMinecraft: スナップショット毎週〜正式版数ヶ月単位");
+        });
+    </script>
+    <script>
         // クッキーが非表示設定のパネルをDOMレンダリング前にCSSで隠す（フラッシュ防止）
         (function() {
             var map = [
@@ -626,8 +660,8 @@
         </div>
         <div id="debug-body">
         <table>
-            <tr><td class="label" title="01.Ver&#10;アプリケーションバージョン番号&#10;初期値: 0.0.13&#10;典型的なMMO: 定期更新あり&#10;Minecraft: Java 1.21.x, 定期スナップショット更新">01.Ver:</td><td class="value" id="val-ver">0.0.13</td></tr>
-            <tr><td class="label" title="02.Update&#10;最終更新日&#10;初期値: 2026/03/06&#10;典型的なMMO: 週〜月単位で更新&#10;Minecraft: スナップショット毎週〜正式版数ヶ月単位">02.Update:</td><td class="value">2026/03/06</td></tr>
+            <tr><td id="label-ver" class="label">01.Ver:</td><td class="value" id="val-ver"></td></tr>
+            <tr><td id="label-update" class="label">02.Update:</td><td class="value" id="val-update"></td></tr>
             <tr><td class="label" title="03.Scale&#10;レンダリング解像度スケール（BabylonJS hardwareScalingLevel）&#10;初期値: 1.0（ネイティブ解像度）&#10;典型的なMMO: 1.0〜2.0（高負荷時は2.0で50%解像度）&#10;Minecraft: 解像度スケール非対応（常にネイティブ）, 描画距離で代替">03.Scale:</td><td class="value">
                 <select id="scaleSelect" class="debug-select">
                     <option value="0.5">0.5</option>
@@ -732,6 +766,9 @@
             <tr><td class="label" title="37.NPC&#10;NPC（npc001〜003）の表示をON/OFFします&#10;初期値: Off">37.NPC:</td><td class="value">
                 <button id="npcVisBtn" class="debug-btn off">Off</button>
             </td></tr>
+            <tr><td class="label" title="38.Avatar Thick&#10;アバターの厚みを調節します&#10;初期値: 5 (depth=0.05)&#10;最小: 1 (depth=0.01) 最大: 50 (depth=0.50)">38.Avatar Thick:</td><td class="value">
+                <input type="number" id="avatarThickInput" class="debug-input" min="1" max="50" step="1" value="5" style="width:60px;">
+            </td></tr>
         </table>
         </div>
     </div>
@@ -809,6 +846,8 @@
             <button id="clearBtn" class="ui-btn">クリア</button>
         </div>
     </div>
+
+    <div id="app-footer-version" style="position:fixed;bottom:4px;right:8px;font-size:10px;font-family:monospace;text-align:right;opacity:0.85;pointer-events:none;z-index:1;line-height:1.5;"></div>
 
     <script type="module" src="/src/main.ts"></script>
 </body>
