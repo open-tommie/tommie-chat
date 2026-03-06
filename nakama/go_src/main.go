@@ -102,6 +102,11 @@ func (m *worldMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db 
 	return state, data
 }
 
+// rpcPing はクライアントのラウンドトリップ時間計測用 RPC
+func rpcPing(_ context.Context, _ runtime.Logger, _ *sql.DB, _ runtime.NakamaModule, _ string) (string, error) {
+	return "{}", nil
+}
+
 // InitModule は Nakama プラグインのエントリポイント
 func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
 	if err := initializer.RegisterMatch("world", func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) (runtime.Match, error) {
@@ -113,6 +118,9 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 		return err
 	}
 	if err := initializer.RegisterRpc("getWorldMatch", rpcGetWorldMatch); err != nil {
+		return err
+	}
+	if err := initializer.RegisterRpc("ping", rpcPing); err != nil {
 		return err
 	}
 	logger.Info("server_info module loaded")

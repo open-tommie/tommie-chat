@@ -212,4 +212,16 @@ export class NakamaService {
         } catch { /* ignore */ }
         return null;
     }
+
+    // サーバへの RPC ラウンドトリップ時間を計測する（ms）
+    async measurePing(): Promise<number | null> {
+        if (!this.session) return null;
+        try {
+            const t0 = performance.now();
+            await this.client.rpc(this.session, "ping", "" as unknown as object);
+            return Math.round(performance.now() - t0);
+        } catch {
+            return null;
+        }
+    }
 }

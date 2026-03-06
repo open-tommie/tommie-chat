@@ -140,6 +140,15 @@ function worldMatchSignal(
     return { state: state, data: data };
 }
 
+function rpcPing(
+    _ctx: nkruntime.Context,
+    _logger: nkruntime.Logger,
+    _nk: nkruntime.Nakama,
+    _payload: string
+): string {
+    return "{}";
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function InitModule(
     _ctx: nkruntime.Context,
@@ -158,5 +167,6 @@ function InitModule(
     });
     initializer.registerRpc("getServerInfo", rpcGetServerInfo);
     initializer.registerRpc("getWorldMatch", rpcGetWorldMatch);
+    initializer.registerRpc("ping", rpcPing);
     logger.info("server_info module loaded");
 }

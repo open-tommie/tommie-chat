@@ -709,6 +709,7 @@ export class GameScene {
                     loginBtn.onclick = doLogout;
                 }
                 if (loginNameInput) loginNameInput.onkeydown = null;
+                startPing();
             } catch (e) {
                 console.error("Nakama login failed:", e);
                 let reason: string;
@@ -738,9 +739,39 @@ export class GameScene {
             }
         };
 
+        // ===== ping 計測 =====
+        const pingDisplay = document.getElementById("ping-display");
+        const PING_INTERVAL_MS = 3000; // 3秒ごと（典型的なMMOのping間隔）
+        const PING_SAMPLES     = 3;    // 3回平均
+        const pingSamples: number[] = [];
+        let pingTimer: ReturnType<typeof setInterval> | null = null;
+
+        const startPing = () => {
+            if (pingTimer !== null) return;
+            if (pingDisplay) pingDisplay.style.display = "";
+            const tick = async () => {
+                const ms = await this.nakama.measurePing();
+                if (ms !== null) {
+                    pingSamples.push(ms);
+                    if (pingSamples.length > PING_SAMPLES) pingSamples.shift();
+                    const avg = Math.round(pingSamples.reduce((a, b) => a + b, 0) / pingSamples.length);
+                    if (pingDisplay) pingDisplay.textContent = `ping=${avg}ms`;
+                }
+            };
+            tick();
+            pingTimer = setInterval(tick, PING_INTERVAL_MS);
+        };
+
+        const stopPing = () => {
+            if (pingTimer !== null) { clearInterval(pingTimer); pingTimer = null; }
+            pingSamples.length = 0;
+            if (pingDisplay) { pingDisplay.style.display = "none"; pingDisplay.textContent = ""; }
+        };
+
         const doLogout = () => {
             const host = srvUrlInput?.value.trim()  || "127.0.0.1";
             const port = srvPortInput?.value.trim() || "7350";
+            stopPing();
             this.nakama.logout();
             addServerLog(host, port, "ログアウト");
             userMap.clear();
