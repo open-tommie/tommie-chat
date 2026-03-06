@@ -878,6 +878,15 @@ export class GameScene {
             drawPingGraph();
         };
 
+        // ping-display クリックで Ping グラフパネルを開く
+        if (pingDisplay) {
+            pingDisplay.style.cursor = "pointer";
+            pingDisplay.addEventListener("click", () => {
+                const btn = document.getElementById("menu-ping");
+                if (btn) btn.click();
+            });
+        }
+
         // ===== Ping パネル ドラッグ & クローズ =====
         {
             const ppanel  = document.getElementById("ping-panel")  as HTMLElement;
