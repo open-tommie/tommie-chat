@@ -833,7 +833,7 @@
                 <div style="background:rgba(0,0,0,0.12);border-radius:4px;padding:2px 6px 4px 6px;">
                 <div style="font-weight:bold;font-size:11px;color:#333;margin-bottom:2px;border-bottom:1px solid rgba(0,0,0,0.2);padding-bottom:1px;">Build Mode</div>
                 <table style="width:100%;border-collapse:collapse;">
-                    <tr><td class="label" title="39.Build Mode&#10;ビルドモードON/OFF（Bキーと同じ）&#10;ONのとき地面をクリックしてブロックを設置/削除できます">39.Build Mode:</td><td class="value">
+                    <tr><td class="label" title="39.Build Mode&#10;ビルドモードON/OFF&#10;Bキー: ON/OFF切り替え&#10;ESCキー: OFFにする&#10;ONのとき地面をクリックしてブロックを設置/削除できます">39.Build Mode:</td><td class="value">
                         <button id="buildModeBtn" class="debug-btn off">Off</button>
                     </td></tr>
                     <tr><td class="label" title="40.Block Color&#10;ビルドモードで置くブロックの色を選択します">40.Block Color:</td><td class="value">
@@ -934,7 +934,7 @@
     </div>
 
     <div id="ping-display" style="position:fixed;top:4px;right:8px;font-size:12px;font-family:monospace;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.8);pointer-events:auto;z-index:9999;"></div>
-    <div id="build-mode-indicator" style="display:none;position:fixed;top:4px;left:50%;transform:translateX(-50%);font-size:13px;font-family:monospace;color:#fff;background:rgba(30,100,220,0.75);padding:2px 12px;border-radius:6px;text-shadow:0 1px 2px rgba(0,0,0,0.6);z-index:9999;pointer-events:none;">🔨 ビルドモード（Bキーで解除）</div>
+    <div id="build-mode-indicator" style="display:none;position:fixed;top:4px;left:50%;transform:translateX(-50%);font-size:13px;font-family:monospace;color:#fff;background:rgba(30,100,220,0.75);padding:2px 12px;border-radius:6px;text-shadow:0 1px 2px rgba(0,0,0,0.6);z-index:9999;pointer-events:auto;cursor:pointer;" title="クリックでビルドモード解除">🔨 ビルドモード（B/ESC/クリックで解除）</div>
 
     <div id="ping-panel">
         <div id="ping-header">

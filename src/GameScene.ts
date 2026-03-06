@@ -39,6 +39,8 @@ export class GameScene {
     
     private hoverMarker!: Mesh;
     private clickMarker!: Mesh;
+    private previewBlock!: Mesh;
+    private previewMat!: StandardMaterial;
 
     private updatePlayerSpeech!: (newText: string) => void;
     private updatePlayerNameTag!: (newName: string) => void;
@@ -1239,6 +1241,28 @@ export class GameScene {
         return { update: (newName: string) => { textBlock.text = newName; }, plane: namePlane };
     }
 
+    private refreshPreviewBlock(): void {
+        const pick = this.scene.pick(this.scene.pointerX, this.scene.pointerY, (mesh) => mesh.name === "ground");
+        if (pick?.hit && pick.pickedPoint) {
+            const px = Math.floor(pick.pickedPoint.x) + 0.5;
+            const pz = Math.floor(pick.pickedPoint.z) + 0.5;
+            const colorInput = document.getElementById("blockColorInput") as HTMLInputElement | null;
+            const hex = colorInput?.value ?? "#3366ff";
+            const r = parseInt(hex.slice(1, 3), 16) / 255;
+            const g = parseInt(hex.slice(3, 5), 16) / 255;
+            const b = parseInt(hex.slice(5, 7), 16) / 255;
+            const opacityInput = document.getElementById("blockOpacityInput") as HTMLInputElement | null;
+            const alpha = Math.min(1, Math.max(0, parseFloat(opacityInput?.value ?? "0.5")));
+            this.previewMat.diffuseColor = new Color3(r, g, b);
+            this.previewMat.alpha = alpha;
+            this.previewBlock.position.x = px;
+            this.previewBlock.position.z = pz;
+            this.previewBlock.isVisible = true;
+        } else {
+            this.previewBlock.isVisible = false;
+        }
+    }
+
     private getOrCreateBlockMat(r: number, g: number, b: number, a: number): StandardMaterial {
         const key = `${r}_${g}_${b}_${a}`;
         if (!this.blockMatCache.has(key)) {
@@ -1273,6 +1297,14 @@ export class GameScene {
         ground.material = gridMaterial;
         ground.freezeWorldMatrix();
 
+
+        this.previewBlock = MeshBuilder.CreateBox("previewBlock", { size: 1 }, this.scene);
+        this.previewBlock.position.y = 0.5;
+        this.previewBlock.isPickable = false;
+        this.previewBlock.isVisible = false;
+        this.previewMat = new StandardMaterial("previewMat", this.scene);
+        this.previewMat.needDepthPrePass = true;
+        this.previewBlock.material = this.previewMat;
 
         this.hoverMarker = MeshBuilder.CreatePlane("hoverMarker", { size: 1.0 }, this.scene);
         this.hoverMarker.rotation.x = Math.PI / 2;
@@ -1395,25 +1427,43 @@ export class GameScene {
             if (key === "b") {
                 this.buildMode = !this.buildMode;
                 const indicator = document.getElementById("build-mode-indicator");
-                if (indicator) indicator.style.display = this.buildMode ? "" : "none";
+                if (indicator) {
+                    indicator.style.display = this.buildMode ? "" : "none";
+                    if (this.buildMode) indicator.textContent = "🔨 ビルドモード（B/ESCキーで解除）";
+                }
                 const btn = document.getElementById("buildModeBtn") as HTMLButtonElement | null;
                 if (btn) {
                     btn.textContent = this.buildMode ? "On" : "Off";
                     btn.classList.toggle("off", !this.buildMode);
                 }
+                if (this.buildMode) this.refreshPreviewBlock();
+                else this.previewBlock.isVisible = false;
             }
+            if (key === "escape" && this.buildMode) {
+                this.buildMode = false;
+                const indicator = document.getElementById("build-mode-indicator");
+                if (indicator) indicator.style.display = "none";
+                const btn = document.getElementById("buildModeBtn") as HTMLButtonElement | null;
+                if (btn) { btn.textContent = "Off"; btn.classList.add("off"); }
+                this.previewBlock.isVisible = false;
+            }
+        });
+
+        document.getElementById("build-mode-indicator")?.addEventListener("click", () => {
+            if (!this.buildMode) return;
+            this.buildMode = false;
+            const indicator = document.getElementById("build-mode-indicator");
+            if (indicator) indicator.style.display = "none";
+            const btn = document.getElementById("buildModeBtn") as HTMLButtonElement | null;
+            if (btn) { btn.textContent = "Off"; btn.classList.add("off"); }
+            this.previewBlock.isVisible = false;
         });
 
         // ビルドモード: ネイティブ canvas click でブロック設置/撤去
         const _canvas = this.engine.getRenderingCanvas();
         if (_canvas) {
             _canvas.addEventListener("click", (_e: MouseEvent) => {
-                const indicator = document.getElementById("build-mode-indicator");
-                if (!this.buildMode) {
-                    if (indicator) indicator.textContent = "OFF (buildMode=false)";
-                    return;
-                }
-                if (indicator) indicator.textContent = `px=${this.scene.pointerX.toFixed(0)},py=${this.scene.pointerY.toFixed(0)} picking...`;
+                if (!this.buildMode) return;
                 const pick = this.scene.pick(this.scene.pointerX, this.scene.pointerY, (mesh) => mesh.name === "ground");
                 if (pick?.hit && pick.pickedPoint) {
                     const gx = Math.floor(pick.pickedPoint.x + 50);
@@ -1430,15 +1480,8 @@ export class GameScene {
                         const opacityInput = document.getElementById("blockOpacityInput") as HTMLInputElement | null;
                         const opacity = Math.min(1, Math.max(0, parseFloat(opacityInput?.value ?? "0.5")));
                         const a = Math.round(opacity * 255);
-                        if (indicator) indicator.textContent = `gx=${gx} gz=${gz} blockId=${blockId} sending...`;
-                        this.nakama.setBlock(gx, gz, blockId, r, g, b, a)
-                            .then(() => { if (indicator) indicator.textContent = `gx=${gx} gz=${gz} OK`; })
-                            .catch((err: unknown) => { if (indicator) indicator.textContent = `ERR: ${String(err)}`; });
-                    } else {
-                        if (indicator) indicator.textContent = `out of bounds gx=${gx} gz=${gz}`;
+                        this.nakama.setBlock(gx, gz, blockId, r, g, b, a).catch(() => {});
                     }
-                } else {
-                    if (indicator) indicator.textContent = `miss (hit=${pick?.hit})`;
                 }
             });
         }
@@ -1452,11 +1495,16 @@ export class GameScene {
                 );
 
                 if (pick && pick.hit && pick.pickedPoint) {
-                    this.hoverMarker.position.x = Math.floor(pick.pickedPoint.x) + 0.5;
-                    this.hoverMarker.position.z = Math.floor(pick.pickedPoint.z) + 0.5;
+                    const px = Math.floor(pick.pickedPoint.x) + 0.5;
+                    const pz = Math.floor(pick.pickedPoint.z) + 0.5;
+                    this.hoverMarker.position.x = px;
+                    this.hoverMarker.position.z = pz;
                     this.hoverMarker.isVisible = true;
+                    if (this.buildMode) this.refreshPreviewBlock();
+                    else this.previewBlock.isVisible = false;
                 } else {
                     this.hoverMarker.isVisible = false;
+                    this.previewBlock.isVisible = false;
                 }
             }
 
@@ -2228,7 +2276,12 @@ export class GameScene {
                 buildModeBtn.textContent = this.buildMode ? "On" : "Off";
                 buildModeBtn.classList.toggle("off", !this.buildMode);
                 const indicator = document.getElementById("build-mode-indicator");
-                if (indicator) indicator.style.display = this.buildMode ? "" : "none";
+                if (indicator) {
+                    indicator.style.display = this.buildMode ? "" : "none";
+                    if (this.buildMode) indicator.textContent = "🔨 ビルドモード（B/ESCキーで解除）";
+                }
+                if (this.buildMode) this.refreshPreviewBlock();
+                else this.previewBlock.isVisible = false;
             });
         }
 
