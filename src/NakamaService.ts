@@ -24,7 +24,7 @@ export class NakamaService {
     onAvatarInitPos?:    (sessionId: string, x: number, z: number, ry: number) => void;
     onAvatarMoveTarget?: (sessionId: string, x: number, z: number) => void;
     onAvatarChange?:     (sessionId: string, textureUrl: string) => void;
-    onBlockUpdate?:      (gx: number, gz: number, blockId: number) => void;
+    onBlockUpdate?:      (gx: number, gz: number, blockId: number, r: number, g: number, b: number, a: number) => void;
 
     constructor(host = "127.0.0.1", port = "7350", useSSL = false) {
         this.client = new Client("defaultkey", host, port, useSSL);
@@ -86,8 +86,8 @@ export class NakamaService {
                 try {
                     const payload = JSON.parse(new TextDecoder().decode(md.data));
                     if (md.op_code === OP_BLOCK_UPDATE) {
-                        const b = payload as { gx: number; gz: number; blockId: number };
-                        this.onBlockUpdate?.(b.gx, b.gz, b.blockId);
+                        const blk = payload as { gx: number; gz: number; blockId: number; r: number; g: number; b: number; a: number };
+                        this.onBlockUpdate?.(blk.gx, blk.gz, blk.blockId, blk.r ?? 255, blk.g ?? 255, blk.b ?? 255, blk.a ?? 255);
                     } else if (!sid) {
                         return;
                     } else if (md.op_code === OP_INIT_POS) {
@@ -215,9 +215,9 @@ export class NakamaService {
         return null;
     }
 
-    async setBlock(gx: number, gz: number, blockId: number): Promise<void> {
+    async setBlock(gx: number, gz: number, blockId: number, r: number, g: number, b: number, a = 255): Promise<void> {
         if (!this.session) return;
-        await this.client.rpc(this.session, "setBlock", { gx, gz, blockId } as unknown as object);
+        await this.client.rpc(this.session, "setBlock", { gx, gz, blockId, r, g, b, a } as unknown as object);
     }
 
     async getGroundTable(): Promise<number[] | null> {

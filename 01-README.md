@@ -91,7 +91,7 @@ docker-compose up -d
 ポート: 5432
 データベース名: nakama
 ユーザー名: nakama(postgresではないので注意)
-パスワード: localdb
+パスワード: localdev（localdbではない）
 
 ### PSQLコマンド
 

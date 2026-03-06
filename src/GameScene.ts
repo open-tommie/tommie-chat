@@ -57,9 +57,10 @@ export class GameScene {
     private remoteSpeeches = new Map<string, (text: string) => void>();
 
     // ===== 地面ブロック =====
-    private groundTable = new Uint16Array(100 * 100); // [gx*100+gz]
+    // 6バイト/セル: [lo,hi,R,G,B,A] where lo|hi<<8 = blockId
+    private groundTable = new Uint8Array(100 * 100 * 6);
     private blockMeshes = new Map<number, Mesh>();
-    private blockMat!: StandardMaterial;
+    private blockMatCache = new Map<string, StandardMaterial>();
     private buildMode = false;
     private latestPingAvg: number | null = null;
     private playerTextureUrl = "/textures/pic1.ktx2";
@@ -702,20 +703,25 @@ export class GameScene {
                 await this.nakama.joinWorldMatch();
 
                 // ブロック更新通知の受信
-                this.nakama.onBlockUpdate = (gx, gz, blockId) => {
-                    console.log(`[onBlockUpdate] gx=${gx} gz=${gz} blockId=${blockId}`);
-                    this.groundTable[gx * 100 + gz] = blockId;
-                    this.placeBlock(gx, gz, blockId);
+                this.nakama.onBlockUpdate = (gx, gz, blockId, r, g, b, a) => {
+                    console.log(`[onBlockUpdate] gx=${gx} gz=${gz} blockId=${blockId} rgb=(${r},${g},${b})`);
+                    const base = (gx * 100 + gz) * 6;
+                    this.groundTable[base]   = blockId & 0xFF;
+                    this.groundTable[base+1] = (blockId >> 8) & 0xFF;
+                    this.groundTable[base+2] = r; this.groundTable[base+3] = g;
+                    this.groundTable[base+4] = b; this.groundTable[base+5] = a;
+                    this.placeBlock(gx, gz, blockId, r, g, b, a);
                 };
 
-                // 初期地面テーブルをサーバから取得して反映
+                // 初期地面テーブルをサーバから取得して反映 (6バイト/セル)
                 this.nakama.getGroundTable().then(table => {
-                    if (!table) return;
+                    if (!table || table.length !== 100 * 100 * 6) return;
+                    for (let i = 0; i < table.length; i++) this.groundTable[i] = table[i];
                     for (let gx = 0; gx < 100; gx++) {
                         for (let gz = 0; gz < 100; gz++) {
-                            const blockId = table[gx * 100 + gz];
-                            this.groundTable[gx * 100 + gz] = blockId;
-                            if (blockId !== 0) this.placeBlock(gx, gz, blockId);
+                            const base = (gx * 100 + gz) * 6;
+                            const blockId = table[base] | (table[base+1] << 8);
+                            if (blockId !== 0) this.placeBlock(gx, gz, blockId, table[base+2], table[base+3], table[base+4], table[base+5]);
                         }
                     }
                 }).catch(() => {});
@@ -1233,14 +1239,25 @@ export class GameScene {
         return { update: (newName: string) => { textBlock.text = newName; }, plane: namePlane };
     }
 
-    private placeBlock(gx: number, gz: number, blockId: number): void {
+    private getOrCreateBlockMat(r: number, g: number, b: number, a: number): StandardMaterial {
+        const key = `${r}_${g}_${b}_${a}`;
+        if (!this.blockMatCache.has(key)) {
+            const mat = new StandardMaterial(`blockMat_${key}`, this.scene);
+            mat.diffuseColor = new Color3(r / 255, g / 255, b / 255);
+            if (a < 255) mat.alpha = a / 255;
+            this.blockMatCache.set(key, mat);
+        }
+        return this.blockMatCache.get(key)!;
+    }
+
+    private placeBlock(gx: number, gz: number, blockId: number, r: number, g: number, b: number, a = 255): void {
         const key = gx * 100 + gz;
         const existing = this.blockMeshes.get(key);
         if (existing) { existing.dispose(); this.blockMeshes.delete(key); }
         if (blockId === 0) return;
         const box = MeshBuilder.CreateBox(`block_${gx}_${gz}`, { size: 1 }, this.scene);
         box.position.set(gx - 50 + 0.5, 0.5, gz - 50 + 0.5);
-        box.material = this.blockMat;
+        box.material = this.getOrCreateBlockMat(r, g, b, a);
         box.isPickable = false;
         this.blockMeshes.set(key, box);
     }
@@ -1256,8 +1273,6 @@ export class GameScene {
         ground.material = gridMaterial;
         ground.freezeWorldMatrix();
 
-        this.blockMat = new StandardMaterial("blockMat", this.scene);
-        this.blockMat.diffuseColor = new Color3(0.2, 0.4, 1.0);
 
         this.hoverMarker = MeshBuilder.CreatePlane("hoverMarker", { size: 1.0 }, this.scene);
         this.hoverMarker.rotation.x = Math.PI / 2;
@@ -1399,9 +1414,16 @@ export class GameScene {
                     const gx = Math.floor(pick.pickedPoint.x + 50);
                     const gz = Math.floor(pick.pickedPoint.z + 50);
                     if (gx >= 0 && gx < 100 && gz >= 0 && gz < 100) {
-                        const blockId = this.groundTable[gx * 100 + gz] === 0 ? 1 : 0;
+                        const base = (gx * 100 + gz) * 6;
+                        const curId = this.groundTable[base] | (this.groundTable[base+1] << 8);
+                        const blockId = curId === 0 ? 1 : 0;
+                        const colorInput = document.getElementById("blockColorInput") as HTMLInputElement | null;
+                        const hex = colorInput?.value ?? "#3366ff";
+                        const r = parseInt(hex.slice(1, 3), 16);
+                        const g = parseInt(hex.slice(3, 5), 16);
+                        const b = parseInt(hex.slice(5, 7), 16);
                         if (indicator) indicator.textContent = `gx=${gx} gz=${gz} blockId=${blockId} sending...`;
-                        this.nakama.setBlock(gx, gz, blockId)
+                        this.nakama.setBlock(gx, gz, blockId, r, g, b, 255)
                             .then(() => { if (indicator) indicator.textContent = `gx=${gx} gz=${gz} OK`; })
                             .catch((err: unknown) => { if (indicator) indicator.textContent = `ERR: ${String(err)}`; });
                     } else {
