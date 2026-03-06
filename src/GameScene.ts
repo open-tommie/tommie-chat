@@ -1422,8 +1422,11 @@ export class GameScene {
                         const r = parseInt(hex.slice(1, 3), 16);
                         const g = parseInt(hex.slice(3, 5), 16);
                         const b = parseInt(hex.slice(5, 7), 16);
+                        const opacityInput = document.getElementById("blockOpacityInput") as HTMLInputElement | null;
+                        const opacity = Math.min(1, Math.max(0, parseFloat(opacityInput?.value ?? "0.5")));
+                        const a = Math.round(opacity * 255);
                         if (indicator) indicator.textContent = `gx=${gx} gz=${gz} blockId=${blockId} sending...`;
-                        this.nakama.setBlock(gx, gz, blockId, r, g, b, 255)
+                        this.nakama.setBlock(gx, gz, blockId, r, g, b, a)
                             .then(() => { if (indicator) indicator.textContent = `gx=${gx} gz=${gz} OK`; })
                             .catch((err: unknown) => { if (indicator) indicator.textContent = `ERR: ${String(err)}`; });
                     } else {
