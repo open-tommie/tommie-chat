@@ -525,6 +525,59 @@
         .server-log-entry.srv-ok  { color: #000; }
         .server-log-entry.srv-err { color: #000; }
 
+        /* ===== Ping グラフパネル ===== */
+        #ping-panel {
+            position: fixed;
+            top: 15px;
+            right: 300px;
+            width: 300px;
+            height: 160px;
+            min-width: 180px;
+            min-height: 80px;
+            background: rgba(255,255,255,0.35);
+            backdrop-filter: blur(2px);
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.12);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            resize: both;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 12px;
+            color: #000;
+        }
+        #ping-header {
+            padding: 4px 8px;
+            font-weight: bold;
+            font-size: 13px;
+            color: #000;
+            border-bottom: 1px solid rgba(0,0,0,0.15);
+            background: rgba(255,255,255,0.4);
+            cursor: grab;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+            flex-shrink: 0;
+        }
+        #ping-header:active { cursor: grabbing; }
+        #ping-close {
+            cursor: pointer;
+            font-size: 11px;
+            line-height: 1;
+            opacity: 0.6;
+            padding: 4px 6px;
+        }
+        #ping-close:hover { opacity: 1; }
+        #ping-canvas {
+            flex: 1;
+            display: block;
+            width: 100%;
+            min-height: 0;
+            background: transparent;
+        }
+
         /* ===== ハンバーガーメニュー ===== */
         #menu-btn {
             position: fixed;
@@ -628,7 +681,8 @@
                 ["showSrvLog",      "server-log-panel"],
                 ["showUserList",    "user-list-panel"],
                 ["showChatHist",    "chat-history-panel"],
-                ["showDebug",       "debug-overlay"]
+                ["showDebug",       "debug-overlay"],
+                ["showPing",        "ping-panel"]
             ];
             var getCookie = function(name) {
                 var m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
@@ -832,6 +886,7 @@
         <button class="menu-item" id="menu-serverlog">✓ サーバ接続ログ</button>
         <button class="menu-item" id="menu-userlist">✓ ユーザリスト</button>
         <button class="menu-item" id="menu-chathistory">✓ チャット履歴</button>
+        <button class="menu-item" id="menu-ping">✓ Ping グラフ</button>
         <button class="menu-item" id="menu-debug">✓ デバッグツール</button>
         <hr style="margin:4px 0;border-color:rgba(255,255,255,0.2);">
         <button class="menu-item" id="menu-cookie-reset">全パネル非表示（クッキー初期化）</button>
@@ -852,6 +907,14 @@
     </div>
 
     <div id="ping-display" style="display:none;position:fixed;top:4px;right:8px;font-size:12px;font-family:monospace;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.8);pointer-events:none;z-index:9999;"></div>
+
+    <div id="ping-panel">
+        <div id="ping-header">
+            <span>Ping グラフ</span>
+            <span id="ping-close">❌️</span>
+        </div>
+        <canvas id="ping-canvas"></canvas>
+    </div>
 
     <div id="app-footer-version" style="position:fixed;bottom:4px;right:8px;font-size:10px;font-family:monospace;text-align:right;opacity:0.85;pointer-events:none;z-index:1;line-height:1.5;"></div>
 

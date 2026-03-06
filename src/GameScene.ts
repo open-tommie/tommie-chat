@@ -739,12 +739,117 @@ export class GameScene {
             }
         };
 
-        // ===== ping 計測 =====
-        const pingDisplay = document.getElementById("ping-display");
-        const PING_INTERVAL_MS = 3000; // 3秒ごと（典型的なMMOのping間隔）
-        const PING_SAMPLES     = 3;    // 3回平均
+        // ===== ping 計測 & グラフ =====
+        const pingDisplay    = document.getElementById("ping-display");
+        const PING_INTERVAL_MS  = 3000; // 3秒ごと（典型的なMMOのping間隔）
+        const PING_SAMPLES      = 3;    // 移動平均サンプル数
+        const PING_HISTORY_MAX  = 60;   // グラフ保持数（60×3秒＝3分）
         const pingSamples: number[] = [];
+        const pingHistory: number[] = [];
         let pingTimer: ReturnType<typeof setInterval> | null = null;
+
+        const drawPingGraph = () => {
+            const canvas = document.getElementById("ping-canvas") as HTMLCanvasElement | null;
+            if (!canvas) return;
+            const w = canvas.clientWidth, h = canvas.clientHeight;
+            if (w === 0 || h === 0) return;
+            const dpr = window.devicePixelRatio || 1;
+            const pw = Math.round(w * dpr), ph = Math.round(h * dpr);
+            if (canvas.width !== pw || canvas.height !== ph) {
+                canvas.width = pw; canvas.height = ph;
+            }
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            const AXIS_H = 16;          // 横軸ラベル領域
+            const gh     = h - AXIS_H; // グラフ描画領域の高さ
+            ctx.clearRect(0, 0, w, h);
+
+            const maxPing = Math.max(300, ...(pingHistory.length ? pingHistory : [0])) * 1.1;
+            const toY = (ms: number) => gh - Math.min(ms / maxPing, 1) * gh;
+
+            const FONT_MONO = '"Courier New", Courier, monospace';
+
+            // 横罫線（ping値 50ms ごと）
+            const pingStep = maxPing <= 450 ? 50 : 100;
+            ctx.lineWidth = 1;
+            for (let ms = pingStep; ms < maxPing; ms += pingStep) {
+                const yp = toY(ms);
+                if (yp < 0) break;
+                const isMajor = ms % 100 === 0;
+                ctx.strokeStyle = isMajor ? "rgba(0,0,0,0.20)" : "rgba(0,0,0,0.08)";
+                ctx.setLineDash(isMajor ? [4, 3] : [2, 5]);
+                ctx.beginPath(); ctx.moveTo(0, yp); ctx.lineTo(w, yp); ctx.stroke();
+                if (isMajor) {
+                    ctx.fillStyle = "rgba(0,0,0,0.75)";
+                    ctx.font = `12px ${FONT_MONO}`;
+                    ctx.fillText(`${ms}ms`, 2, yp - 2);
+                }
+            }
+            ctx.setLineDash([]);
+
+            // 縦罫線（時間軸）＋横軸目盛りラベル — 常に全目盛りを描画
+            const step    = w / (PING_HISTORY_MAX - 1);
+            const offsetX = (PING_HISTORY_MAX - pingHistory.length) * step;
+            const TICK_STEP = 10;
+            for (let n = TICK_STEP; n < PING_HISTORY_MAX; n += TICK_STEP) {
+                const xp = Math.round((PING_HISTORY_MAX - 1 - n) * step);
+                if (xp < 0 || xp > w) continue;
+                ctx.strokeStyle = "rgba(0,0,0,0.12)";
+                ctx.setLineDash([2, 4]);
+                ctx.beginPath(); ctx.moveTo(xp, 0); ctx.lineTo(xp, gh); ctx.stroke();
+                ctx.setLineDash([]);
+                const sec = n * Math.round(PING_INTERVAL_MS / 1000);
+                const label = sec >= 60
+                    ? `-${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`
+                    : `-${sec}s`;
+                ctx.fillStyle = "rgba(0,0,0,0.70)";
+                ctx.font = `12px ${FONT_MONO}`;
+                const lw = ctx.measureText(label).width;
+                ctx.fillText(label, Math.max(0, Math.min(xp - lw / 2, w - lw)), h - 2);
+            }
+
+            // 横軸境界線
+            ctx.strokeStyle = "rgba(0,0,0,0.20)";
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(0, gh); ctx.lineTo(w, gh); ctx.stroke();
+
+            if (pingHistory.length === 0) return;
+
+            // データプロット（右端が最新、左へスクロール）
+            // 塗りつぶし
+            ctx.beginPath();
+            pingHistory.forEach((v, i) => {
+                const x = offsetX + i * step, y = toY(v);
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.lineTo(offsetX + (pingHistory.length - 1) * step, gh);
+            ctx.lineTo(offsetX, gh);
+            ctx.closePath();
+            ctx.fillStyle = "rgba(140,200,255,0.18)";
+            ctx.fill();
+
+            // ライン
+            ctx.beginPath();
+            pingHistory.forEach((v, i) => {
+                const x = offsetX + i * step, y = toY(v);
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.strokeStyle = "rgba(140,200,255,0.85)"; ctx.lineWidth = 1.5; ctx.stroke();
+
+            // avg テキスト（右上、背景付き）
+            if (pingSamples.length > 0) {
+                const avg = Math.round(pingSamples.reduce((a, b) => a + b, 0) / pingSamples.length);
+                ctx.font = `bold 12px ${FONT_MONO}`;
+                const label = `avg ${avg}ms`;
+                const lw = ctx.measureText(label).width;
+                ctx.fillStyle = "rgba(255,255,255,0.65)";
+                ctx.fillRect(w - lw - 8, 3, lw + 6, 16);
+                ctx.fillStyle = "rgba(0,0,0,0.85)";
+                ctx.fillText(label, w - lw - 5, 15);
+            }
+        };
 
         const startPing = () => {
             if (pingTimer !== null) return;
@@ -754,8 +859,11 @@ export class GameScene {
                 if (ms !== null) {
                     pingSamples.push(ms);
                     if (pingSamples.length > PING_SAMPLES) pingSamples.shift();
+                    pingHistory.push(ms);
+                    if (pingHistory.length > PING_HISTORY_MAX) pingHistory.shift();
                     const avg = Math.round(pingSamples.reduce((a, b) => a + b, 0) / pingSamples.length);
                     if (pingDisplay) pingDisplay.textContent = `ping=${avg}ms`;
+                    drawPingGraph();
                 }
             };
             tick();
@@ -765,8 +873,74 @@ export class GameScene {
         const stopPing = () => {
             if (pingTimer !== null) { clearInterval(pingTimer); pingTimer = null; }
             pingSamples.length = 0;
+            pingHistory.length = 0;
             if (pingDisplay) { pingDisplay.style.display = "none"; pingDisplay.textContent = ""; }
+            drawPingGraph();
         };
+
+        // ===== Ping パネル ドラッグ & クローズ =====
+        {
+            const ppanel  = document.getElementById("ping-panel")  as HTMLElement;
+            const pheader = document.getElementById("ping-header") as HTMLElement;
+            const pclose  = document.getElementById("ping-close")  as HTMLElement;
+
+            if (ppanel && pheader) {
+                const sCkP = (k: string, v: string) =>
+                    document.cookie = `${k}=${encodeURIComponent(v)};path=/;max-age=${60*60*24*365}`;
+                const gCkP = (k: string): string | null => {
+                    const m = document.cookie.match(new RegExp("(?:^|; )" + k + "=([^;]*)"));
+                    return m ? decodeURIComponent(m[1]) : null;
+                };
+
+                const initRect = ppanel.getBoundingClientRect();
+                ppanel.style.left  = initRect.left + "px";
+                ppanel.style.right = "auto";
+                const savedL = gCkP("pgLeft"), savedT = gCkP("pgTop");
+                const savedW = gCkP("pgWidth"), savedH = gCkP("pgHeight");
+                if (savedL !== null) { ppanel.style.left = savedL + "px"; ppanel.style.right = "auto"; }
+                if (savedT !== null) ppanel.style.top    = savedT + "px";
+                if (savedW !== null) ppanel.style.width  = savedW + "px";
+                if (savedH !== null) ppanel.style.height = savedH + "px";
+                this.clampToViewport(ppanel);
+
+                let isDragP = false, offXP = 0, offYP = 0;
+                pheader.addEventListener("mousedown", (e: MouseEvent) => {
+                    if ((e.target as HTMLElement).id === "ping-close") return;
+                    isDragP = true;
+                    offXP = e.clientX - ppanel.getBoundingClientRect().left;
+                    offYP = e.clientY - ppanel.getBoundingClientRect().top;
+                    e.preventDefault();
+                });
+                document.addEventListener("mousemove", (e: MouseEvent) => {
+                    if (!isDragP) return;
+                    ppanel.style.left = Math.max(0, e.clientX - offXP) + "px";
+                    ppanel.style.top  = Math.max(0, e.clientY - offYP) + "px";
+                });
+                document.addEventListener("mouseup", () => {
+                    if (!isDragP) return;
+                    isDragP = false;
+                    const r = ppanel.getBoundingClientRect();
+                    sCkP("pgLeft", String(Math.round(r.left)));
+                    sCkP("pgTop",  String(Math.round(r.top)));
+                    drawPingGraph();
+                });
+                new ResizeObserver(() => {
+                    const r = ppanel.getBoundingClientRect();
+                    sCkP("pgWidth",  String(Math.round(r.width)));
+                    sCkP("pgHeight", String(Math.round(r.height)));
+                    drawPingGraph();
+                }).observe(ppanel);
+
+                if (pclose) {
+                    pclose.addEventListener("click", () => {
+                        ppanel.style.display = "none";
+                        sCkP("showPing", "0");
+                        const mb = document.getElementById("menu-ping");
+                        if (mb) mb.textContent = "　 Ping グラフ";
+                    });
+                }
+            }
+        }
 
         const doLogout = () => {
             const host = srvUrlInput?.value.trim()  || "127.0.0.1";
@@ -1683,7 +1857,7 @@ export class GameScene {
             cookieReset.addEventListener("click", () => {
                 // 全パネルを非表示にしてからリロード
                 ["server-settings-panel", "server-log-panel", "user-list-panel",
-                 "chat-history-panel", "debug-overlay"].forEach(id => {
+                 "chat-history-panel", "ping-panel", "debug-overlay"].forEach(id => {
                     const el = document.getElementById(id);
                     if (el) el.style.display = "none";
                 });
@@ -1698,6 +1872,7 @@ export class GameScene {
                 document.cookie = `showSrvLog=0;${maxAge}`;
                 document.cookie = `showUserList=0;${maxAge}`;
                 document.cookie = `showChatHist=0;${maxAge}`;
+                document.cookie = `showPing=0;${maxAge}`;
                 document.cookie = `showDebug=0;${maxAge}`;
                 // 現在のビューポートに合わせたデフォルト配置をクッキーに書き込む
                 const vw = window.innerWidth;
@@ -1776,6 +1951,7 @@ export class GameScene {
             makeToggle("menu-serverlog",      "server-log-panel",      "サーバ接続ログ", "showSrvLog");
             makeToggle("menu-userlist",       "user-list-panel",       "ユーザリスト",  "showUserList");
             makeToggle("menu-chathistory",    "chat-history-panel",    "チャット履歴",  "showChatHist");
+            makeToggle("menu-ping",           "ping-panel",            "Ping グラフ",   "showPing");
             makeToggle("menu-debug",          "debug-overlay",         "デバッグツール", "showDebug");
         }
 
