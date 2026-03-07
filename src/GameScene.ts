@@ -77,7 +77,7 @@ export class GameScene {
     constructor(canvas: HTMLCanvasElement) {
         this.engine = new Engine(canvas, false, { stencil: true });
         
-        this.engine.setHardwareScalingLevel(1.0);
+        this.engine.setHardwareScalingLevel(1 / window.devicePixelRatio);
 
         this.scene = new Scene(this.engine);
 
@@ -121,10 +121,11 @@ export class GameScene {
         this.camera.keysLeft = [];
         this.camera.keysRight = [];
 
-        this.camera.lowerRadiusLimit = 2; 
+        this.camera.lowerRadiusLimit = 2;
         this.camera.upperRadiusLimit = 50;
         this.camera.fovMode = ArcRotateCamera.FOVMODE_VERTICAL_FIXED;
         this.camera.inertia = 0;
+        this.camera.useNaturalPinchZoom = true;
         
         this.camera.maxZ = 200;
         this.camera.fov = 60 * Math.PI / 180;
@@ -196,14 +197,15 @@ export class GameScene {
             let dragOffsetX = 0;
             let dragOffsetY = 0;
 
-            historyHeader.addEventListener("mousedown", (e: MouseEvent) => {
+            historyHeader.addEventListener("pointerdown", (e: PointerEvent) => {
                 isDragging = true;
                 dragOffsetX = e.clientX - historyPanel.getBoundingClientRect().left;
                 dragOffsetY = e.clientY - historyPanel.getBoundingClientRect().top;
+                historyHeader.setPointerCapture(e.pointerId);
                 e.preventDefault();
             });
 
-            document.addEventListener("mousemove", (e: MouseEvent) => {
+            document.addEventListener("pointermove", (e: PointerEvent) => {
                 if (!isDragging) return;
                 const x = Math.max(0, e.clientX - dragOffsetX);
                 const y = Math.max(0, e.clientY - dragOffsetY);
@@ -211,7 +213,7 @@ export class GameScene {
                 historyPanel.style.top  = y + "px";
             });
 
-            document.addEventListener("mouseup", () => {
+            document.addEventListener("pointerup", () => {
                 if (isDragging) {
                     isDragging = false;
                     savePanelState();
@@ -265,19 +267,20 @@ export class GameScene {
                 if (savedH !== null) ulPanel.style.height = savedH + "px";
 
                 let isDrag = false, offX = 0, offY = 0;
-                ulHeader.addEventListener("mousedown", (e: MouseEvent) => {
+                ulHeader.addEventListener("pointerdown", (e: PointerEvent) => {
                     if ((e.target as HTMLElement).id === "user-list-close") return;
                     isDrag = true;
                     offX = e.clientX - ulPanel.getBoundingClientRect().left;
                     offY = e.clientY - ulPanel.getBoundingClientRect().top;
+                    ulHeader.setPointerCapture(e.pointerId);
                     e.preventDefault();
                 });
-                document.addEventListener("mousemove", (e: MouseEvent) => {
+                document.addEventListener("pointermove", (e: PointerEvent) => {
                     if (!isDrag) return;
                     ulPanel.style.left = Math.max(0, e.clientX - offX) + "px";
                     ulPanel.style.top  = Math.max(0, e.clientY - offY) + "px";
                 });
-                document.addEventListener("mouseup", () => {
+                document.addEventListener("pointerup", () => {
                     if (!isDrag) return;
                     isDrag = false;
                     const r = ulPanel.getBoundingClientRect();
@@ -342,19 +345,20 @@ export class GameScene {
 
                 // ドラッグ
                 let isDrag = false, offX = 0, offY = 0;
-                srvHeader.addEventListener("mousedown", (e: MouseEvent) => {
+                srvHeader.addEventListener("pointerdown", (e: PointerEvent) => {
                     if ((e.target as HTMLElement).id === "server-settings-close") return;
                     isDrag = true;
                     offX = e.clientX - srvPanel.getBoundingClientRect().left;
                     offY = e.clientY - srvPanel.getBoundingClientRect().top;
+                    srvHeader.setPointerCapture(e.pointerId);
                     e.preventDefault();
                 });
-                document.addEventListener("mousemove", (e: MouseEvent) => {
+                document.addEventListener("pointermove", (e: PointerEvent) => {
                     if (!isDrag) return;
                     srvPanel.style.left = Math.max(0, e.clientX - offX) + "px";
                     srvPanel.style.top  = Math.max(0, e.clientY - offY) + "px";
                 });
-                document.addEventListener("mouseup", () => {
+                document.addEventListener("pointerup", () => {
                     if (!isDrag) return;
                     isDrag = false;
                     const r = srvPanel.getBoundingClientRect();
@@ -400,19 +404,20 @@ export class GameScene {
                 this.clampToViewport(slPanel);
 
                 let isDrag = false, offX = 0, offY = 0;
-                slHeader.addEventListener("mousedown", (e: MouseEvent) => {
+                slHeader.addEventListener("pointerdown", (e: PointerEvent) => {
                     if ((e.target as HTMLElement).id === "server-log-close") return;
                     isDrag = true;
                     offX = e.clientX - slPanel.getBoundingClientRect().left;
                     offY = e.clientY - slPanel.getBoundingClientRect().top;
+                    slHeader.setPointerCapture(e.pointerId);
                     e.preventDefault();
                 });
-                document.addEventListener("mousemove", (e: MouseEvent) => {
+                document.addEventListener("pointermove", (e: PointerEvent) => {
                     if (!isDrag) return;
                     slPanel.style.left = Math.max(0, e.clientX - offX) + "px";
                     slPanel.style.top  = Math.max(0, e.clientY - offY) + "px";
                 });
-                document.addEventListener("mouseup", () => {
+                document.addEventListener("pointerup", () => {
                     if (!isDrag) return;
                     isDrag = false;
                     const r = slPanel.getBoundingClientRect();
@@ -683,6 +688,8 @@ export class GameScene {
         };
         // ===========================
 
+        let loggedInHost = "";
+        let loggedInPort = "";
         const NAKAMA_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._@+\-]{5,127}$/;
         const doLogin = async () => {
             const name = loginNameInput?.value.trim();
@@ -738,6 +745,8 @@ export class GameScene {
                 { const p = this.playerBox; this.nakama.sendInitPos(p.position.x, p.position.z, p.rotation.y).catch(() => {}); }
                 const srvInfo = await this.nakama.getServerInfo();
                 addServerLog(host, port, "ログイン成功", srvInfo);
+                loggedInHost = host;
+                loggedInPort = port;
                 if (loginStatus) {
                     loginStatus.style.color = "#00dd55";
                     loginStatus.textContent = "✔ログイン済み";
@@ -804,18 +813,19 @@ export class GameScene {
             const gh     = h - AXIS_H; // グラフ描画領域の高さ
             ctx.clearRect(0, 0, w, h);
 
-            const maxPing = Math.max(300, ...(pingHistory.length ? pingHistory : [0])) * 1.1;
+            const validPings = pingHistory.filter(v => v >= 0);
+            const maxPing = Math.max(100, ...(validPings.length ? validPings : [0])) * 1.1;
             const toY = (ms: number) => gh - Math.min(ms / maxPing, 1) * gh;
 
             const FONT_MONO = '"Courier New", Courier, monospace';
 
-            // 横罫線（ping値 50ms ごと）
-            const pingStep = maxPing <= 450 ? 50 : 100;
+            // 横罫線 — 10ms毎にサブ罫線、50ms毎にメジャー罫線（ラベル付き）
             ctx.lineWidth = 1;
-            for (let ms = pingStep; ms < maxPing; ms += pingStep) {
+            const subStep = 10;
+            for (let ms = subStep; ms < maxPing; ms += subStep) {
                 const yp = toY(ms);
                 if (yp < 0) break;
-                const isMajor = ms % 100 === 0;
+                const isMajor = ms % 50 === 0;
                 ctx.strokeStyle = isMajor ? "rgba(0,0,0,0.20)" : "rgba(0,0,0,0.08)";
                 ctx.setLineDash(isMajor ? [4, 3] : [2, 5]);
                 ctx.beginPath(); ctx.moveTo(0, yp); ctx.lineTo(w, yp); ctx.stroke();
@@ -856,30 +866,55 @@ export class GameScene {
             if (pingHistory.length === 0) return;
 
             // データプロット（右端が最新、左へスクロール）
-            // 塗りつぶし
-            ctx.beginPath();
-            pingHistory.forEach((v, i) => {
-                const x = offsetX + i * step, y = toY(v);
-                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-            });
-            ctx.lineTo(offsetX + (pingHistory.length - 1) * step, gh);
-            ctx.lineTo(offsetX, gh);
-            ctx.closePath();
-            ctx.fillStyle = "rgba(140,200,255,0.18)";
-            ctx.fill();
+            // -1 = 切断（0ms 赤表示）、0以上 = 正常（青表示）
+            const plotY = (v: number) => v < 0 ? gh : toY(v);
 
-            // ライン
-            ctx.beginPath();
-            pingHistory.forEach((v, i) => {
-                const x = offsetX + i * step, y = toY(v);
-                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-            });
-            ctx.strokeStyle = "rgba(140,200,255,0.85)"; ctx.lineWidth = 1.5; ctx.stroke();
+            // 塗りつぶし — 正常区間(青)と切断区間(赤)を分けて描画
+            const drawSegment = (start: number, end: number, isDisc: boolean) => {
+                ctx.beginPath();
+                for (let i = start; i <= end; i++) {
+                    const x = offsetX + i * step, y = plotY(pingHistory[i]);
+                    if (i === start) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.lineTo(offsetX + end * step, gh);
+                ctx.lineTo(offsetX + start * step, gh);
+                ctx.closePath();
+                ctx.fillStyle = isDisc ? "rgba(255,80,80,0.25)" : "rgba(80,200,80,0.18)";
+                ctx.fill();
+
+                ctx.beginPath();
+                for (let i = start; i <= end; i++) {
+                    const x = offsetX + i * step, y = plotY(pingHistory[i]);
+                    if (i === start) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.strokeStyle = isDisc ? "rgba(255,80,80,0.85)" : "rgba(80,200,80,0.85)";
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            };
+
+            let segStart = 0;
+            let segDisc = pingHistory[0] < 0;
+            for (let i = 1; i < pingHistory.length; i++) {
+                const disc = pingHistory[i] < 0;
+                if (disc !== segDisc) {
+                    drawSegment(segStart, i, segDisc);
+                    segStart = i;
+                    segDisc = disc;
+                }
+            }
+            drawSegment(segStart, pingHistory.length - 1, segDisc);
 
             // avg テキスト（右上、背景付き）
-            if (pingSamples.length > 0) {
+            ctx.font = `bold 12px ${FONT_MONO}`;
+            if (pingDisconnected) {
+                const label = "回線切断中";
+                const lw = ctx.measureText(label).width;
+                ctx.fillStyle = "rgba(255,255,255,0.65)";
+                ctx.fillRect(w - lw - 8, 3, lw + 6, 16);
+                ctx.fillStyle = "#ff4444";
+                ctx.fillText(label, w - lw - 5, 15);
+            } else if (pingSamples.length > 0) {
                 const avg = Math.round(pingSamples.reduce((a, b) => a + b, 0) / pingSamples.length);
-                ctx.font = `bold 12px ${FONT_MONO}`;
                 const label = `avg ${avg}ms`;
                 const lw = ctx.measureText(label).width;
                 ctx.fillStyle = "rgba(255,255,255,0.65)";
@@ -889,17 +924,46 @@ export class GameScene {
             }
         };
 
+        let pingFailCount = 0;
+        let pingDisconnected = false;
+        const PING_FAIL_THRESHOLD = 3;
+
         const startPing = () => {
             if (pingTimer !== null) return;
+            pingFailCount = 0;
+            pingDisconnected = false;
             const tick = async () => {
                 const ms = await this.nakama.measurePing();
                 if (ms !== null) {
+                    pingFailCount = 0;
+                    if (pingDisconnected) {
+                        pingDisconnected = false;
+                        addServerLog(loggedInHost, loggedInPort, "回線復帰");
+                        if (loginStatus) {
+                            loginStatus.style.color = "#00dd55";
+                            loginStatus.textContent = "✔回線復帰";
+                        }
+                    }
                     pingSamples.push(ms);
                     if (pingSamples.length > PING_SAMPLES) pingSamples.shift();
                     pingHistory.push(ms);
                     if (pingHistory.length > PING_HISTORY_MAX) pingHistory.shift();
                     this.latestPingAvg = Math.round(pingSamples.reduce((a, b) => a + b, 0) / pingSamples.length);
                     drawPingGraph();
+                } else {
+                    pingFailCount++;
+                    pingHistory.push(-1);
+                    if (pingHistory.length > PING_HISTORY_MAX) pingHistory.shift();
+                    drawPingGraph();
+                    if (pingFailCount >= PING_FAIL_THRESHOLD && !pingDisconnected) {
+                        pingDisconnected = true;
+                        this.latestPingAvg = -1;
+                        addServerLog(loggedInHost, loggedInPort, "回線切断", "ネットワーク障害またはサーバ停止により切断されました");
+                        if (loginStatus) {
+                            loginStatus.style.color = "#ff4444";
+                            loginStatus.textContent = "✘回線切断";
+                        }
+                    }
                 }
             };
             tick();
@@ -949,19 +1013,20 @@ export class GameScene {
                 this.clampToViewport(ppanel);
 
                 let isDragP = false, offXP = 0, offYP = 0;
-                pheader.addEventListener("mousedown", (e: MouseEvent) => {
+                pheader.addEventListener("pointerdown", (e: PointerEvent) => {
                     if ((e.target as HTMLElement).id === "ping-close") return;
                     isDragP = true;
                     offXP = e.clientX - ppanel.getBoundingClientRect().left;
                     offYP = e.clientY - ppanel.getBoundingClientRect().top;
+                    pheader.setPointerCapture(e.pointerId);
                     e.preventDefault();
                 });
-                document.addEventListener("mousemove", (e: MouseEvent) => {
+                document.addEventListener("pointermove", (e: PointerEvent) => {
                     if (!isDragP) return;
                     ppanel.style.left = Math.max(0, e.clientX - offXP) + "px";
                     ppanel.style.top  = Math.max(0, e.clientY - offYP) + "px";
                 });
-                document.addEventListener("mouseup", () => {
+                document.addEventListener("pointerup", () => {
                     if (!isDragP) return;
                     isDragP = false;
                     const r = ppanel.getBoundingClientRect();
@@ -1043,7 +1108,7 @@ export class GameScene {
         const lineH = 20; // line-height (CSSと一致)
         const borderH = 4; // border-top + border-bottom
         let lastH = textarea.offsetHeight;
-        document.addEventListener("mouseup", () => {
+        document.addEventListener("pointerup", () => {
             const h = textarea.offsetHeight;
             if (h === lastH) return;
             const lines = Math.max(1, Math.round((h - borderH) / lineH));
@@ -1733,7 +1798,7 @@ export class GameScene {
             let leadingMult: number;
             if (aaMode) {
                 fontFamily = "'ＭＳ Ｐゴシック', 'MS PGothic', 'Mona', sans-serif";
-                leadingMult = 1.125;
+                leadingMult = 1.0;
             } else {
                 fontFamily = (document.getElementById("speechFontSelect") as HTMLSelectElement | null)?.value ?? "monospace";
                 leadingMult = parseFloat((document.getElementById("speechLeadingSelect") as HTMLSelectElement | null)?.value ?? "1.3");
@@ -1754,7 +1819,7 @@ export class GameScene {
                 lH  = Math.round(lH  * fit);
             }
             const drawFontSize = Math.round(fontSize * fit);
-            const drawLineSpacing = Math.round(lineSpacing * fit);
+
             const ttX = Math.round(60 * (bH1 / 108));
             const tbL = Math.round(30 * (bH1 / 108));
             const tbR = Math.round(90 * (bH1 / 108));
@@ -1764,19 +1829,20 @@ export class GameScene {
 
             ctx.font = `bold ${drawFontSize}px ${fontFamily}`;
             const maxTextW = Math.max(...clippedLines.map(l => ctx.measureText(l).width));
-            const usedTexW = Math.min(texW, Math.max(60, Math.ceil(leftPad + maxTextW + rightPad)));
+            const rawUsedTexW = Math.max(60, Math.ceil(leftPad + maxTextW + rightPad));
+            // テキストが texW を超える場合は水平圧縮し、プレーン X 拡大で縦横比を復元
+            const fitX = rawUsedTexW > texW ? texW / rawUsedTexW : 1;
+            const usedTexW = rawUsedTexW > texW ? texW : rawUsedTexW;
 
             const bodyH  = bH1 + (n - 1) * lH;
             const totalH = bodyH + tH;
 
-            // 縦横比1:1を保つため x/y を同率でスケール（planeW/texW ≈ maxPlaneH/texH なので均一スケールで正方ピクセル）
             const s = totalH / texH;
+            const scaleX = s / fitX; // fitX < 1 のときプレーンを横に広げて圧縮を相殺
             bubblePlane.scaling.y = s;
-            bubblePlane.scaling.x = s;
-            // 三角形の先端を固定位置に保つ（下端固定で上方向に成長）
+            bubblePlane.scaling.x = scaleX;
             bubblePlane.position.y = fixedBottom + s * maxPlaneH / 2;
-            // 左端（三角形側）を固定したまま右方向へ伸縮
-            bubblePlane.position.x = (nameW / 2 - 0.5) + planeW * s / 2;
+            bubblePlane.position.x = (nameW / 2 - 0.5) + planeW * scaleX / 2;
 
             // 吹き出し形状（usedTexW 内に描画）
             ctx.beginPath();
@@ -1799,14 +1865,23 @@ export class GameScene {
             ctx.lineWidth = 3;
             ctx.stroke();
 
-            // テキスト（固定フォントサイズ・狭い行間・垂直センタリング）
+            // テキスト描画（テキストが texW を超える場合は水平圧縮して収める）
             ctx.fillStyle = "#111";
             ctx.textAlign = "left";
             ctx.textBaseline = "middle";
-            const totalTextH = n * lineSpacing;
-            const textStartY = (bodyH - totalTextH) / 2 + lineSpacing / 2;
-            for (let i = 0; i < n; i++) {
-                ctx.fillText(clippedLines[i], leftPad, textStartY + i * lineSpacing);
+            const totalTextH = n * lH;
+            const textStartY = (bodyH - totalTextH) / 2 + lH / 2;
+            if (fitX < 1) {
+                ctx.save();
+                ctx.scale(fitX, 1);
+                for (let i = 0; i < n; i++) {
+                    ctx.fillText(clippedLines[i], leftPad / fitX, textStartY + i * lH);
+                }
+                ctx.restore();
+            } else {
+                for (let i = 0; i < n; i++) {
+                    ctx.fillText(clippedLines[i], leftPad, textStartY + i * lH);
+                }
             }
 
             dynTex.update();
@@ -2014,20 +2089,21 @@ export class GameScene {
             let isDragging = false;
             let dragOX = 0, dragOY = 0;
 
-            debugTitleBar.addEventListener("mousedown", (e: MouseEvent) => {
+            debugTitleBar.addEventListener("pointerdown", (e: PointerEvent) => {
                 if ((e.target as HTMLElement).tagName === "BUTTON") return;
                 isDragging = true;
                 const rect = debugOverlay.getBoundingClientRect();
                 dragOX = e.clientX - rect.left;
                 dragOY = e.clientY - rect.top;
+                debugTitleBar.setPointerCapture(e.pointerId);
                 e.preventDefault();
             });
-            document.addEventListener("mousemove", (e: MouseEvent) => {
+            document.addEventListener("pointermove", (e: PointerEvent) => {
                 if (!isDragging) return;
                 debugOverlay.style.left = Math.max(0, e.clientX - dragOX) + "px";
                 debugOverlay.style.top  = Math.max(0, e.clientY - dragOY) + "px";
             });
-            document.addEventListener("mouseup", () => {
+            document.addEventListener("pointerup", () => {
                 if (isDragging) { isDragging = false; saveDebugState(); }
             });
 
@@ -2218,6 +2294,39 @@ export class GameScene {
         if (apiv) apiv.innerText = isWebGPU ? "WebGPU" : "WebGL2";
 
         if (scaleSelect) {
+            // UIの初期選択をDPRに合わせる
+            const initScale = 1 / window.devicePixelRatio;
+            const initScaleStr = initScale.toFixed(2);
+            const exactMatch = Array.from(scaleSelect.options).find(o => Math.abs(parseFloat(o.value) - initScale) < 0.001);
+            if (!exactMatch) {
+                // 既存の選択肢にない場合は数値順の位置に挿入
+                const opt = document.createElement("option");
+                opt.value = initScaleStr;
+                opt.text = `${initScaleStr} (初期値)`;
+                const insertBefore = Array.from(scaleSelect.options).find(o => parseFloat(o.value) > initScale);
+                scaleSelect.insertBefore(opt, insertBefore ?? null);
+            } else {
+                exactMatch.text = `${exactMatch.text.replace(/ \(初期値\)$/, "")} (初期値)`;
+            }
+            scaleSelect.value = initScaleStr;
+
+            // ツールチップにDPR情報を追加
+            const labelScale = document.getElementById("label-scale");
+            if (labelScale) {
+                const dpr = window.devicePixelRatio;
+                labelScale.title = [
+                    "03.Scale",
+                    "レンダリング解像度スケール（BabylonJS hardwareScalingLevel）",
+                    `初期値: 1/devicePixelRatio = ${initScale.toFixed(2)}（devicePixelRatio=${dpr.toFixed(2)}）`,
+                    "初期値: 1 / window.devicePixelRatio を自動計算して設定",
+                    "DPR=2 → 0.5（Retina/4K → クッキリ）",
+                    "DPR=1 → 1.0（通常モニター → 無駄なし）",
+                    "DPR=3 → 0.333... → UIは最近傍の 0.5 を選択",
+                    "典型的なMMO: 1.0〜2.0（高負荷時は2.0で50%解像度）",
+                    "Minecraft: 解像度スケール非対応（常にネイティブ）, 描画距離で代替",
+                ].join("\n");
+            }
+
             scaleSelect.addEventListener("change", (e) => {
                 const target = e.target as HTMLSelectElement;
                 const newScale = parseFloat(target.value);
@@ -2383,6 +2492,20 @@ export class GameScene {
                 aaModeBtn.textContent = on ? "On" : "Off";
                 aaModeBtn.classList.toggle("on", on);
                 aaModeBtn.classList.toggle("off", !on);
+
+                if (on) {
+                    // AA Mode ON → Speech Trim OFF / Font プロポーショナル / Leading 1.125
+                    const trimBtn = document.getElementById("speechTrimBtn") as HTMLButtonElement | null;
+                    if (trimBtn) {
+                        trimBtn.textContent = "Off";
+                        trimBtn.classList.remove("on");
+                        trimBtn.classList.add("off");
+                    }
+                    const fontSel = document.getElementById("speechFontSelect") as HTMLSelectElement | null;
+                    if (fontSel) fontSel.value = "sans-serif";
+                    const leadSel = document.getElementById("speechLeadingSelect") as HTMLSelectElement | null;
+                    if (leadSel) leadSel.value = "1.0";
+                }
             });
         }
 
@@ -2474,8 +2597,16 @@ export class GameScene {
             if (fv) fv.innerText = fps;
             const pd = document.getElementById("ping-display");
             if (pd) {
-                const pingStr = this.latestPingAvg !== null ? String(Math.min(999, this.latestPingAvg)).padStart(3, " ") : "---";
-                pd.textContent = `ping=${pingStr}ms FPS=${fps}`;
+                if (this.latestPingAvg !== null && this.latestPingAvg < 0) {
+                    pd.textContent = `回線切断中 FPS=${fps}`;
+                    pd.style.color = "#ff4444";
+                } else if (this.latestPingAvg !== null) {
+                    pd.textContent = `ping=${this.latestPingAvg}ms FPS=${fps}`;
+                    pd.style.color = "";
+                } else {
+                    pd.textContent = `ログアウト中 FPS=${fps}`;
+                    pd.style.color = "";
+                }
             }
             
             if (sceneInstrumentation.frameTimeCounter && cv) {

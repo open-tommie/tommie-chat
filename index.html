@@ -110,6 +110,7 @@
             justify-content: space-between;
             align-items: center;
             user-select: none;
+            touch-action: none;
         }
         #user-list-close {
             cursor: pointer;
@@ -170,8 +171,8 @@
             position: fixed;
             top: 15px;
             right: 15px;
-            width: 270px;
-            min-width: 180px;
+            width: 310px;
+            min-width: 200px;
             min-height: 40px;
             max-height: calc(100vh - 120px);
             background: rgba(255, 255, 255, 0.45);
@@ -205,6 +206,7 @@
             flex-shrink: 0;
             background: transparent;
             user-select: none;
+            touch-action: none;
             border-radius: 8px 8px 0 0;
         }
         #debug-title-bar:active { cursor: grabbing; }
@@ -250,7 +252,6 @@
         #debug-overlay td {
             padding: 1px 0;
             vertical-align: middle;
-            overflow: hidden;
             white-space: nowrap;
         }
         #debug-overlay td.label {
@@ -355,6 +356,7 @@
             justify-content: space-between;
             align-items: center;
             user-select: none;
+            touch-action: none;
         }
         #chat-history-header:active { cursor: grabbing; }
         #chat-history-close {
@@ -427,6 +429,7 @@
             justify-content: space-between;
             align-items: center;
             user-select: none;
+            touch-action: none;
         }
         #server-settings-close {
             cursor: pointer;
@@ -508,6 +511,7 @@
             justify-content: space-between;
             align-items: center;
             user-select: none;
+            touch-action: none;
             flex-shrink: 0;
         }
         #server-log-close {
@@ -567,6 +571,7 @@
             justify-content: space-between;
             align-items: center;
             user-select: none;
+            touch-action: none;
             flex-shrink: 0;
         }
         #ping-header:active { cursor: grabbing; }
@@ -646,6 +651,25 @@
         .menu-item:hover {
             background: rgba(255, 255, 255, 0.15);
         }
+
+        /* ===== モバイル用カスタムツールチップ ===== */
+        #mobile-tooltip {
+            position: fixed;
+            z-index: 99999;
+            max-width: 280px;
+            background: rgba(30, 30, 30, 0.93);
+            color: #fff;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 11px;
+            line-height: 1.5;
+            padding: 8px 10px;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+            white-space: pre-wrap;
+            word-break: break-word;
+            pointer-events: none;
+            display: none;
+        }
     </style>
     <script>
         // アプリバージョン・更新日の定数（ここだけ変更する）
@@ -679,6 +703,74 @@
             if (el) el.setAttribute("title",
                 "02.Update\n最終更新日\n初期値: " + APP_DATE +
                 "\n典型的なMMO: 週〜月単位で更新\nMinecraft: スナップショット毎週〜正式版数ヶ月単位");
+
+            // ===== モバイル用長押しツールチップ =====
+            var tooltipEl = document.createElement("div");
+            tooltipEl.id = "mobile-tooltip";
+            document.body.appendChild(tooltipEl);
+
+            var tooltipTimer = null;
+            var tooltipVisible = false;
+            var LONG_PRESS_MS = 500;
+
+            function showTooltip(text, touchX, touchY) {
+                tooltipEl.textContent = text;
+                tooltipEl.style.display = "block";
+                tooltipVisible = true;
+                var vw = window.innerWidth, vh = window.innerHeight;
+                var tw = Math.min(280, vw - 20);
+                tooltipEl.style.maxWidth = tw + "px";
+                // 位置: タッチ点の上側に表示、はみ出し補正
+                var x = Math.min(touchX, vw - tw - 10);
+                var y = touchY - 12;
+                tooltipEl.style.left = Math.max(5, x) + "px";
+                tooltipEl.style.top = "";
+                tooltipEl.style.bottom = "";
+                // 仮描画で高さ取得
+                requestAnimationFrame(function() {
+                    var th = tooltipEl.offsetHeight;
+                    if (y - th < 5) {
+                        tooltipEl.style.top = Math.min(touchY + 20, vh - th - 5) + "px";
+                    } else {
+                        tooltipEl.style.top = (y - th) + "px";
+                    }
+                });
+            }
+
+            function hideTooltip() {
+                tooltipEl.style.display = "none";
+                tooltipVisible = false;
+            }
+
+            document.addEventListener("touchstart", function(e) {
+                var target = e.target;
+                // title属性を持つ要素（またはその親）を探す
+                var el = target;
+                var titleText = null;
+                for (var i = 0; i < 4 && el && el !== document.body; i++) {
+                    if (el.getAttribute && el.getAttribute("title")) {
+                        titleText = el.getAttribute("title");
+                        break;
+                    }
+                    el = el.parentElement;
+                }
+                if (!titleText) return;
+                var touch = e.touches[0];
+                tooltipTimer = setTimeout(function() {
+                    showTooltip(titleText, touch.clientX, touch.clientY);
+                }, LONG_PRESS_MS);
+            }, { passive: true });
+
+            document.addEventListener("touchend", function() {
+                clearTimeout(tooltipTimer);
+                tooltipTimer = null;
+                if (tooltipVisible) setTimeout(hideTooltip, 1500);
+            }, { passive: true });
+
+            document.addEventListener("touchmove", function() {
+                clearTimeout(tooltipTimer);
+                tooltipTimer = null;
+            }, { passive: true });
         });
     </script>
     <script>
@@ -728,13 +820,13 @@
         <table>
             <tr><td id="label-ver" class="label">01.Ver:</td><td class="value" id="val-ver"></td></tr>
             <tr><td id="label-update" class="label">02.Update:</td><td class="value" id="val-update"></td></tr>
-            <tr><td class="label" title="03.Scale&#10;レンダリング解像度スケール（BabylonJS hardwareScalingLevel）&#10;初期値: 1.0（ネイティブ解像度）&#10;典型的なMMO: 1.0〜2.0（高負荷時は2.0で50%解像度）&#10;Minecraft: 解像度スケール非対応（常にネイティブ）, 描画距離で代替">03.Scale:</td><td class="value">
+            <tr><td id="label-scale" class="label" title="03.Scale&#10;レンダリング解像度スケール（BabylonJS hardwareScalingLevel）&#10;初期値: 1/devicePixelRatio&#10;典型的なMMO: 1.0〜2.0（高負荷時は2.0で50%解像度）&#10;Minecraft: 解像度スケール非対応（常にネイティブ）, 描画距離で代替">03.Scale:</td><td class="value">
                 <select id="scaleSelect" class="debug-select">
-                    <option value="0.5">0.5</option>
+                    <option value="0.50">0.50 Retina/4K クッキリ</option>
                     <option value="0.75">0.75</option>
-                    <option value="1.0" selected>1.0</option>
-                    <option value="1.5">1.50</option>
-                    <option value="2.0">2.0</option>
+                    <option value="1.00">1.00 通常モニター</option>
+                    <option value="1.50">1.50</option>
+                    <option value="2.00">2.00 解像度50%</option>
                 </select>
             </td></tr>
             <tr><td class="label" title="04.AntiAliasing&#10;アンチエイリアシング（MSAA）。ジャギーを軽減&#10;初期値: Off&#10;典型的なMMO: Off〜2x（パフォーマンス優先時はOff）&#10;Minecraft: バニラはAA非対応, OptiFine/シェーダー: 2〜16xMSAA">04.AntiAliasing:</td><td class="value">
@@ -891,10 +983,10 @@
                             <option value="12">12pt</option>
                             <option value="14">14pt</option>
                             <option value="24">24pt</option>
-                            <option value="36">36pt</option>
+                            <option value="36" selected>36pt</option>
                             <option value="48">48pt</option>
                             <option value="60">60pt</option>
-                            <option value="72" selected>72pt</option>
+                            <option value="72">72pt</option>
                             <option value="84">84pt</option>
                             <option value="96">96pt</option>
                         </select>
