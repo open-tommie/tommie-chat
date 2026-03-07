@@ -40,5 +40,5 @@ docker run --rm \
   "registry.heroiclabs.com/heroiclabs/nakama-pluginbuilder:${NAKAMA_VERSION}" \
   -c "rm -f go.sum && GONOSUMDB='*' go build -mod=mod -buildmode=plugin -trimpath -o /go_src/world.so ."
 
-mv "$SCRIPT_DIR/world.so" "$OUT_DIR/world.so"
+mv -f "$SCRIPT_DIR/world.so" "$OUT_DIR/world.so"
 echo "Built: $OUT_DIR/world.so"

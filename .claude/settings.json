@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://localhost:9090/api/v1/targets)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s http://localhost:9090/api/v1/label/__name__/values)",
+      "Bash(python3 -c \"import sys,json; names=json.load\\(sys.stdin\\)[''data'']; [print\\(n\\) for n in names if ''nakama'' in n.lower\\(\\)]\")"
+    ]
+  }
+}
