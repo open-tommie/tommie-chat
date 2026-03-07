@@ -157,8 +157,31 @@ export class GameScene {
     private setupHtmlUI(): void {
         const isMobileDev = matchMedia("(pointer:coarse) and (min-resolution:2dppx)").matches;
         const isMobileLandscape = () => isMobileDev && matchMedia("(orientation:landscape)").matches;
-        // フラッシュガード CSS を削除（JS側のインラインスタイルで制御するため）
-        document.getElementById("panel-flash-guard")?.remove();
+        // フラッシュガードの非表示状態をインラインスタイルに移してからCSS削除
+        {
+            const guard = document.getElementById("panel-flash-guard");
+            if (guard) {
+                const hiddenPanels = guard.textContent || "";
+                const panelIds = ["server-settings-panel","server-log-panel","user-list-panel",
+                                   "chat-history-panel","debug-overlay","ping-panel"];
+                let allHidden = true;
+                for (const id of panelIds) {
+                    if (hiddenPanels.includes(id)) {
+                        const el = document.getElementById(id);
+                        if (el) el.style.display = "none";
+                    } else {
+                        allHidden = false;
+                    }
+                }
+                // 全パネル非表示時: --ls-divider を先に設定してからガードを外す
+                if (allHidden && isMobileDev && matchMedia("(orientation:landscape)").matches) {
+                    document.documentElement.style.setProperty("--ls-divider", "100%");
+                    const div = document.getElementById("landscape-divider");
+                    if (div) div.style.display = "none";
+                }
+                guard.remove();
+            }
+        }
 
         // ===== ランドスケープ区切りコントロール =====
         {
@@ -2350,6 +2373,7 @@ export class GameScene {
             // ランドスケープ: パネル非表示時はデバイダー非表示＆canvas全画面
             // パネル非表示時に保存する元の --ls-divider 値
             let savedDivider = getComputedStyle(document.documentElement).getPropertyValue("--ls-divider").trim() || "60%";
+            if (savedDivider === "100%") savedDivider = "60%"; // 全画面状態は保存しない
 
             const updateLandscapeLayout = () => {
                 if (!isMobileMenu) return;

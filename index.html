@@ -839,6 +839,8 @@
             }
             #debug-title-text {
                 color: #fff !important;
+                text-align: left !important;
+                font-size: 15px !important;
             }
             #debug-minimize-btn, #debug-restore-btn {
                 color: #fff !important;
@@ -930,15 +932,15 @@
                 line-height: 1;
                 pointer-events: none;
             }
-            /* デバイダー右側の白背景 */
+            /* デバイダー右側の背景（サブピクセルギャップ防止で1px左にオーバーラップ） */
             body::after {
                 content: "";
                 position: fixed;
                 top: 0;
-                left: var(--ls-divider, 60%);
+                left: calc(var(--ls-divider, 60%) - 1px);
                 right: 0;
                 bottom: 0;
-                background: #fff;
+                background: #111;
                 z-index: 0;
                 pointer-events: none;
             }
@@ -1105,9 +1107,14 @@
                 var m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
                 return m ? decodeURIComponent(m[1]) : null;
             };
-            var rules = map.filter(function(p) { return getCookie(p[0]) === "0"; })
-                           .map(function(p) { return "#" + p[1] + "{display:none}"; });
+            var hidden = map.filter(function(p) { return getCookie(p[0]) === "0"; });
+            var rules = hidden.map(function(p) { return "#" + p[1] + "{display:none}"; });
             if (rules.length) {
+                // 全パネル非表示ならランドスケープで全画面化
+                if (hidden.length === map.length) {
+                    rules.push(":root{--ls-divider:100%}");
+                    rules.push("#landscape-divider{display:none}");
+                }
                 var style = document.createElement("style");
                 style.id = "panel-flash-guard";
                 style.textContent = rules.join("");
@@ -1379,7 +1386,7 @@
     <div id="landscape-divider"><div id="landscape-divider-knob">⋮</div></div>
     <div id="chat-container">
         <div id="login-row">
-            <input id="loginName" type="text" placeholder="名前を入力して下さい" title="使える文字: 英数字 (a-z A-Z 0-9) と . _ @ + -&#10;例: tommie, user01, my.name&#10;6〜128文字">
+            <input id="loginName" type="text" placeholder="名前を入力" title="使える文字: 英数字 (a-z A-Z 0-9) と . _ @ + -&#10;例: tommie, user01, my.name&#10;6〜128文字">
             <button id="loginBtn" class="ui-btn" style="width:auto;padding:0 12px;white-space:nowrap;background:#28a74580;">ログイン</button>
             <span id="loginStatus" style="color:#00dd55;font-size:11px;text-shadow:0 1px 2px rgba(0,0,0,0.3);"></span>
         </div>
