@@ -820,7 +820,7 @@ export class GameScene {
                 ctx.setLineDash(isMajor ? [4, 3] : [2, 5]);
                 ctx.beginPath(); ctx.moveTo(0, yp); ctx.lineTo(w, yp); ctx.stroke();
                 if (isMajor) {
-                    ctx.fillStyle = "rgba(0,0,0,0.75)";
+                    ctx.fillStyle = "#000";
                     ctx.font = `12px ${FONT_MONO}`;
                     ctx.fillText(`${ms}ms`, 2, yp - 2);
                 }
@@ -842,7 +842,7 @@ export class GameScene {
                 const label = sec >= 60
                     ? `-${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`
                     : `-${sec}s`;
-                ctx.fillStyle = "rgba(0,0,0,0.70)";
+                ctx.fillStyle = "#000";
                 ctx.font = `12px ${FONT_MONO}`;
                 const lw = ctx.measureText(label).width;
                 ctx.fillText(label, Math.max(0, Math.min(xp - lw / 2, w - lw)), h - 2);
@@ -884,7 +884,7 @@ export class GameScene {
                 const lw = ctx.measureText(label).width;
                 ctx.fillStyle = "rgba(255,255,255,0.65)";
                 ctx.fillRect(w - lw - 8, 3, lw + 6, 16);
-                ctx.fillStyle = "rgba(0,0,0,0.85)";
+                ctx.fillStyle = "#000";
                 ctx.fillText(label, w - lw - 5, 15);
             }
         };
@@ -2469,10 +2469,14 @@ export class GameScene {
             
             if (frameCount % 10 !== 0) return;
 
-            const fps = this.engine.getFps().toFixed(0);
+            const fpsNum = Math.min(99, Math.floor(this.engine.getFps()));
+            const fps = String(fpsNum).padStart(2, "0");
             if (fv) fv.innerText = fps;
             const pd = document.getElementById("ping-display");
-            if (pd) pd.textContent = this.latestPingAvg !== null ? `ping=${this.latestPingAvg}ms, FPS=${fps}` : `FPS=${fps}`;
+            if (pd) {
+                const pingStr = this.latestPingAvg !== null ? String(Math.min(999, this.latestPingAvg)).padStart(3, " ") : "---";
+                pd.textContent = `ping=${pingStr}ms FPS=${fps}`;
+            }
             
             if (sceneInstrumentation.frameTimeCounter && cv) {
                 cv.innerText = sceneInstrumentation.frameTimeCounter.lastSecAverage.toFixed(2);
