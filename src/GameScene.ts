@@ -83,6 +83,16 @@ export class GameScene {
     private aoiRadius = 48; // AOI半径（セル単位）。FarClipとは独立
     private lastAOI = { minCX: -1, minCZ: -1, maxCX: -1, maxCZ: -1 }; // 初回送信を強制するセンチネル
     private syncThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+    private aoiBox: Mesh | null = null;
+    private aoiBoxMat: StandardMaterial | null = null;
+    private aoiVisEnabled = true;
+    private remoteAoiEnabled = false;
+    private remoteAoiBoxes: Mesh[] = [];
+    private remoteAoiMat: StandardMaterial | null = null;
+    private remoteAoiTimer: ReturnType<typeof setInterval> | null = null;
+    private camAutoRotate = true;
+    private cloudMesh: Mesh | null = null;
+    private cloudEnabled = true;
     private blockMeshes = new Map<number, Mesh>();
     private blockMatCache = new Map<string, StandardMaterial>();
     private buildMode = false;
@@ -177,6 +187,88 @@ export class GameScene {
     }
 
     // AOI計算: プレイヤー位置とaoiRadius(固定半径)からチャンク範囲を算出し、変化時にサーバへ送信
+    // 表示制御はサーバのAOI_ENTER/AOI_LEAVEに完全に委任（クライアント側チェック不要）
+    private updateRemoteAvatarVisibility(): void { }
+
+    private updateAOILines(): void {
+        if (this.aoiBox) { this.aoiBox.dispose(); this.aoiBox = null; }
+        if (!this.aoiVisEnabled) return;
+        const a = this.lastAOI;
+        if (a.minCX < 0) return;
+        const half = GameScene.WORLD_SIZE / 2;
+        const CS = GameScene.CHUNK_SIZE;
+        const x0 = a.minCX * CS - half;
+        const z0 = a.minCZ * CS - half;
+        const x1 = (a.maxCX + 1) * CS - half;
+        const z1 = (a.maxCZ + 1) * CS - half;
+        const w = x1 - x0;
+        const d = z1 - z0;
+        const h = 0.3;
+        this.aoiBox = MeshBuilder.CreateBox("aoiBox", { width: w, height: h, depth: d }, this.scene);
+        this.aoiBox.position.x = (x0 + x1) / 2;
+        this.aoiBox.position.y = h / 2 + 0.05;
+        this.aoiBox.position.z = (z0 + z1) / 2;
+        if (!this.aoiBoxMat) {
+            const mat = new StandardMaterial("aoiBoxMat", this.scene);
+            mat.diffuseColor = new Color3(1, 0, 0);
+            mat.alpha = 0.15;
+            mat.backFaceCulling = false;
+            this.aoiBoxMat = mat;
+        }
+        this.aoiBox.material = this.aoiBoxMat;
+        this.aoiBox.isPickable = false;
+    }
+
+    private clearRemoteAoiBoxes(): void {
+        for (const m of this.remoteAoiBoxes) m.dispose();
+        this.remoteAoiBoxes = [];
+    }
+
+    private async refreshRemoteAOI(): Promise<void> {
+        if (!this.remoteAoiEnabled) { this.clearRemoteAoiBoxes(); return; }
+        const players = await this.nakama.getPlayersAOI();
+        this.clearRemoteAoiBoxes();
+        if (!this.remoteAoiEnabled) return; // toggle中に非同期完了した場合
+        const mySid = this.nakama.selfSessionId;
+        const half = GameScene.WORLD_SIZE / 2;
+        const CS = GameScene.CHUNK_SIZE;
+        if (!this.remoteAoiMat) {
+            const mat = new StandardMaterial("remoteAoiMat", this.scene);
+            mat.diffuseColor = new Color3(0, 1, 0);
+            mat.alpha = 0.10;
+            mat.backFaceCulling = false;
+            this.remoteAoiMat = mat;
+        }
+        for (const p of players) {
+            if (p.sessionId === mySid) continue;
+            const x0 = p.minCX * CS - half;
+            const z0 = p.minCZ * CS - half;
+            const x1 = (p.maxCX + 1) * CS - half;
+            const z1 = (p.maxCZ + 1) * CS - half;
+            const w = x1 - x0;
+            const d = z1 - z0;
+            const h = 0.3;
+            const box = MeshBuilder.CreateBox("remoteAoi_" + p.sessionId, { width: w, height: h, depth: d }, this.scene);
+            box.position.x = (x0 + x1) / 2;
+            box.position.y = h / 2 + 0.10;
+            box.position.z = (z0 + z1) / 2;
+            box.material = this.remoteAoiMat;
+            box.isPickable = false;
+            this.remoteAoiBoxes.push(box);
+        }
+    }
+
+    private setRemoteAoiEnabled(enabled: boolean): void {
+        this.remoteAoiEnabled = enabled;
+        if (enabled) {
+            this.refreshRemoteAOI();
+            this.remoteAoiTimer = setInterval(() => this.refreshRemoteAOI(), 2000);
+        } else {
+            if (this.remoteAoiTimer) { clearInterval(this.remoteAoiTimer); this.remoteAoiTimer = null; }
+            this.clearRemoteAoiBoxes();
+        }
+    }
+
     private updateAOI(): void {
         const half = GameScene.WORLD_SIZE / 2;
         const CS = GameScene.CHUNK_SIZE;
@@ -191,10 +283,14 @@ export class GameScene {
         if (minCX !== this.lastAOI.minCX || minCZ !== this.lastAOI.minCZ ||
             maxCX !== this.lastAOI.maxCX || maxCZ !== this.lastAOI.maxCZ) {
             this.lastAOI = { minCX, minCZ, maxCX, maxCZ };
+            console.log(`[AOI_UPDATE] (${minCX},${minCZ})-(${maxCX},${maxCZ})`);
             this.nakama.sendAOI(minCX, minCZ, maxCX, maxCZ).catch(() => {});
             // AOI変化時にチャンクデータも同期（スロットル付き）
             if (this.syncThrottleTimer) clearTimeout(this.syncThrottleTimer);
             this.syncThrottleTimer = setTimeout(() => { this.syncAOIChunks().catch(() => {}); }, 300);
+            // AOI範囲外のリモートアバターを非表示
+            this.updateRemoteAvatarVisibility();
+            this.updateAOILines();
         }
     }
 
@@ -841,16 +937,39 @@ export class GameScene {
             }
         };
         this.nakama.onAvatarInitPos = (sessionId: string, x: number, z: number, ry: number) => {
+            console.log(`[onAvatarInitPos] sid=${sessionId} x=${x} z=${z} hasAvatar=${this.remoteAvatars.has(sessionId)}`);
             const av = this.remoteAvatars.get(sessionId);
-            if (av) { av.position.x = x; av.position.z = z; av.rotation.y = ry; }
+            if (av) {
+                av.position.x = x; av.position.z = z; av.rotation.y = ry;
+                av.setEnabled(true); // サーバがAOIフィルタ済みなので受信=AOI内
+            }
             this.remoteTargets.delete(sessionId);
         };
         this.nakama.onAvatarMoveTarget = (sessionId: string, x: number, z: number) => {
             if (this.remoteAvatars.has(sessionId)) this.remoteTargets.set(sessionId, { x, z });
         };
         this.nakama.onAvatarChange = (sessionId: string, textureUrl: string) => {
+            console.log(`[avatarChange] sessionId=${sessionId} textureUrl=${textureUrl}`);
             const av = this.remoteAvatars.get(sessionId);
             if (av) this.changeAvatarTexture(av, textureUrl);
+        };
+        this.nakama.onAOIEnter = (sessionId: string, x: number, z: number, ry: number, textureUrl: string) => {
+            console.log(`[AOI_ENTER] sid=${sessionId} x=${x} z=${z} ry=${ry} tex=${textureUrl}`);
+            if (sessionId === this.nakama.selfSessionId) return;
+            const av = this.remoteAvatars.get(sessionId);
+            if (av) {
+                av.position.x = x; av.position.z = z; av.rotation.y = ry;
+                av.setEnabled(true); // AOI内に入ったので表示
+                this.remoteTargets.delete(sessionId);
+                if (textureUrl) this.changeAvatarTexture(av, textureUrl);
+            }
+        };
+        this.nakama.onAOILeave = (sessionId: string) => {
+            console.log(`[AOI_LEAVE] sid=${sessionId}`);
+            if (sessionId === this.nakama.selfSessionId) return;
+            const av = this.remoteAvatars.get(sessionId);
+            if (av) av.setEnabled(false);
+            this.remoteTargets.delete(sessionId);
         };
 
         const addRemoteAvatar = (sessionId: string, username: string) => {
@@ -871,6 +990,8 @@ export class GameScene {
             } catch (e) {
             }
             this.remoteAvatars.set(sessionId, av);
+            // 初期表示はfalse。サーバのAOI_ENTERで表示される
+            av.setEnabled(false);
         };
         const removeRemoteAvatar = (sessionId: string) => {
             const av = this.remoteAvatars.get(sessionId);
@@ -1024,8 +1145,9 @@ export class GameScene {
                     this.syncAOIChunks().catch(() => {});
                 }
 
-                // 自分の初期位置を全員へ送信 + AOI送信
+                // 自分の初期位置・アバターを全員へ送信 + AOI送信
                 { const p = this.playerBox; this.nakama.sendInitPos(p.position.x, p.position.z, p.rotation.y).catch(() => {}); }
+                this.nakama.sendAvatarChange(this.playerTextureUrl).catch(() => {});
                 this.updateAOI();
                 const srvInfo = await this.nakama.getServerInfo();
                 addServerLog(host, port, "ログイン成功", srvInfo);
@@ -1946,7 +2068,9 @@ export class GameScene {
                     this.clickMarker.position.x = snappedX;
                     this.clickMarker.position.z = snappedZ;
                     this.clickMarker.isVisible = true;
-                    this.nakama.sendMoveTarget(snappedX, snappedZ).catch(() => {});
+                    // 現在位置を送信（クリック先ではなく）。アニメーション中に逐次更新する
+                    const cp = this.playerBox.position;
+                    this.nakama.sendMoveTarget(cp.x, cp.z).catch(() => {});
                     this.updateAOI();
                 }
             }
@@ -2010,35 +2134,46 @@ export class GameScene {
                     while (diff > Math.PI) diff -= Math.PI * 2;
                     this.playerBox.rotation.y += diff * Math.min(1.0, 15.0 * deltaTime);
 
-                    const moveAngle = Math.atan2(direction.x, direction.z);
-                    const destAlpha = -moveAngle - Math.PI / 2; 
+                    if (this.camAutoRotate) {
+                        const moveAngle = Math.atan2(direction.x, direction.z);
+                        const destAlpha = -moveAngle - Math.PI / 2;
 
-                    let alphaDiff = destAlpha - this.camera.alpha;
-                    while (alphaDiff < -Math.PI) alphaDiff += Math.PI * 2;
-                    while (alphaDiff >  Math.PI) alphaDiff -= Math.PI * 2;
-                    this.camera.alpha += alphaDiff * Math.min(1.0, 2.0 * deltaTime);
+                        let alphaDiff = destAlpha - this.camera.alpha;
+                        while (alphaDiff < -Math.PI) alphaDiff += Math.PI * 2;
+                        while (alphaDiff >  Math.PI) alphaDiff -= Math.PI * 2;
+                        this.camera.alpha += alphaDiff * Math.min(1.0, 2.0 * deltaTime);
+                    }
                 } else {
                     this.playerBox.position.copyFrom(target);
                     this.targetPosition = null;
                     this.clickMarker.isVisible = false;
                 }
+                // キーボード移動と同じスロットルで現在位置をサーバへ送信
+                const now = performance.now();
+                if (now - this.lastKeyboardSendTime >= 100) {
+                    this.lastKeyboardSendTime = now;
+                    const p = this.playerBox.position;
+                    this.nakama.sendMoveTarget(p.x, p.z).catch(() => {});
+                }
+                this.updateAOI();
             }
 
-            // リモートアバターを目標位置へ移動
+            // リモートアバターを目標位置へ移動（表示制御はサーバのAOI_ENTER/LEAVEに任せる）
             for (const [sid, av] of this.remoteAvatars) {
                 const tgt = this.remoteTargets.get(sid);
-                if (!tgt) continue;
-                const dx = tgt.x - av.position.x, dz = tgt.z - av.position.z;
-                const dist = Math.sqrt(dx * dx + dz * dz);
-                if (dist > 0.05) {
-                    const step = Math.min(this.moveSpeed * deltaTime, dist);
-                    av.position.x += (dx / dist) * step;
-                    av.position.z += (dz / dist) * step;
-                    const targetAngle = Math.atan2(dx, dz) + Math.PI;
-                    let diff = targetAngle - av.rotation.y;
-                    while (diff < -Math.PI) diff += Math.PI * 2;
-                    while (diff >  Math.PI) diff -= Math.PI * 2;
-                    av.rotation.y += diff * Math.min(1.0, 15.0 * deltaTime);
+                if (tgt) {
+                    const dx = tgt.x - av.position.x, dz = tgt.z - av.position.z;
+                    const dist = Math.sqrt(dx * dx + dz * dz);
+                    if (dist > 0.05) {
+                        const step = Math.min(this.moveSpeed * deltaTime, dist);
+                        av.position.x += (dx / dist) * step;
+                        av.position.z += (dz / dist) * step;
+                        const targetAngle = Math.atan2(dx, dz) + Math.PI;
+                        let diff = targetAngle - av.rotation.y;
+                        while (diff < -Math.PI) diff += Math.PI * 2;
+                        while (diff >  Math.PI) diff -= Math.PI * 2;
+                        av.rotation.y += diff * Math.min(1.0, 15.0 * deltaTime);
+                    }
                 }
             }
 
@@ -2309,6 +2444,7 @@ export class GameScene {
                 mergedClouds.name = "roundedMinecraftClouds";
                 mergedClouds.material = cloudMaterial;
                 mergedClouds.isPickable = false;
+                this.cloudMesh = mergedClouds;
 
                 this.scene.onBeforeRenderObservable.add(() => {
                     const deltaTime = this.engine.getDeltaTime() / 1000;
@@ -2794,6 +2930,92 @@ export class GameScene {
                     this.camera.maxZ = val;
                     this.scene.fogEnd = val;
                 }
+            });
+        }
+
+        const aoiVisBtn = document.getElementById("aoiVisBtn") as HTMLButtonElement;
+        if (aoiVisBtn) {
+            aoiVisBtn.addEventListener("click", () => {
+                this.aoiVisEnabled = !this.aoiVisEnabled;
+                aoiVisBtn.innerText = this.aoiVisEnabled ? "On" : "Off";
+                if (this.aoiVisEnabled) aoiVisBtn.classList.remove("off");
+                else aoiVisBtn.classList.add("off");
+                this.updateAOILines();
+            });
+        }
+
+        const camAutoRotBtn = document.getElementById("camAutoRotBtn") as HTMLButtonElement;
+        if (camAutoRotBtn) {
+            camAutoRotBtn.addEventListener("click", () => {
+                this.camAutoRotate = !this.camAutoRotate;
+                camAutoRotBtn.innerText = this.camAutoRotate ? "On" : "Off";
+                if (this.camAutoRotate) camAutoRotBtn.classList.remove("off");
+                else camAutoRotBtn.classList.add("off");
+            });
+        }
+
+        const eastUpBtn = document.getElementById("eastUpBtn") as HTMLButtonElement;
+        if (eastUpBtn) {
+            eastUpBtn.addEventListener("click", () => {
+                // 真上から見下ろし、画面上=北(-Z): alpha=π/2, beta=0
+                this.camera.beta = 0;
+                this.camera.alpha = Math.PI / 2;
+                // AOIが画面に収まる最大ズーム（radiusを計算）
+                const a = this.lastAOI;
+                const CS = GameScene.CHUNK_SIZE;
+                const aoiW = (a.maxCX - a.minCX + 1) * CS; // ワールド単位の幅
+                const aoiD = (a.maxCZ - a.minCZ + 1) * CS; // ワールド単位の奥行き
+                const aspect = this.engine.getAspectRatio(this.camera);
+                const vFov = this.camera.fov; // 垂直FOV
+                // beta=0の真上視点: 画面高さ方向=2*r*tan(fov/2), 幅方向=それ*aspect
+                const rForHeight = (aoiD / 2) / Math.tan(vFov / 2);
+                const rForWidth = (aoiW / 2) / (Math.tan(vFov / 2) * aspect);
+                const maxR = this.camera.upperRadiusLimit ?? 200;
+                this.camera.radius = Math.min(Math.max(rForHeight, rForWidth) * 1.05, maxR);
+                // AOI表示=ON
+                if (!this.aoiVisEnabled) {
+                    this.aoiVisEnabled = true;
+                    this.updateAOILines();
+                    if (aoiVisBtn) { aoiVisBtn.innerText = "On"; aoiVisBtn.classList.remove("off"); }
+                }
+                // カメラ自動回転=OFF
+                this.camAutoRotate = false;
+                if (camAutoRotBtn) {
+                    camAutoRotBtn.innerText = "Off";
+                    camAutoRotBtn.classList.add("off");
+                }
+                // 雲=OFF
+                this.cloudEnabled = false;
+                if (this.cloudMesh) this.cloudMesh.setEnabled(false);
+                const cloudBtn = document.getElementById("cloudToggleBtn") as HTMLButtonElement;
+                if (cloudBtn) { cloudBtn.innerText = "Off"; cloudBtn.classList.add("off"); }
+                // Remote AOI=ON
+                if (!this.remoteAoiEnabled) {
+                    this.setRemoteAoiEnabled(true);
+                    const rBtn = document.getElementById("remoteAoiBtn") as HTMLButtonElement;
+                    if (rBtn) { rBtn.innerText = "On"; rBtn.classList.remove("off"); }
+                }
+            });
+        }
+
+        const cloudToggleBtn = document.getElementById("cloudToggleBtn") as HTMLButtonElement;
+        if (cloudToggleBtn) {
+            cloudToggleBtn.addEventListener("click", () => {
+                this.cloudEnabled = !this.cloudEnabled;
+                if (this.cloudMesh) this.cloudMesh.setEnabled(this.cloudEnabled);
+                cloudToggleBtn.innerText = this.cloudEnabled ? "On" : "Off";
+                if (this.cloudEnabled) cloudToggleBtn.classList.remove("off");
+                else cloudToggleBtn.classList.add("off");
+            });
+        }
+
+        const remoteAoiBtn = document.getElementById("remoteAoiBtn") as HTMLButtonElement;
+        if (remoteAoiBtn) {
+            remoteAoiBtn.addEventListener("click", () => {
+                this.setRemoteAoiEnabled(!this.remoteAoiEnabled);
+                remoteAoiBtn.innerText = this.remoteAoiEnabled ? "On" : "Off";
+                if (this.remoteAoiEnabled) remoteAoiBtn.classList.remove("off");
+                else remoteAoiBtn.classList.add("off");
             });
         }
 

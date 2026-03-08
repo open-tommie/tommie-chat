@@ -7,6 +7,8 @@ const OP_MOVE_TARGET   = 2; // クリック移動の目標位置
 const OP_AVATAR_CHANGE = 3; // アバターテクスチャ変更
 const OP_BLOCK_UPDATE  = 4; // ブロック設置/削除通知
 const OP_AOI_UPDATE    = 5; // AOI（チャンク範囲）更新
+const OP_AOI_ENTER     = 6; // AOI内に入ったプレイヤー情報
+const OP_AOI_LEAVE     = 7; // AOI外に出たプレイヤー通知
 
 export class NakamaService {
     private client: Client;
@@ -26,6 +28,8 @@ export class NakamaService {
     onAvatarMoveTarget?: (sessionId: string, x: number, z: number) => void;
     onAvatarChange?:     (sessionId: string, textureUrl: string) => void;
     onBlockUpdate?:      (gx: number, gz: number, blockId: number, r: number, g: number, b: number, a: number) => void;
+    onAOIEnter?:         (sessionId: string, x: number, z: number, ry: number, textureUrl: string) => void;
+    onAOILeave?:         (sessionId: string) => void;
 
     constructor(host = "127.0.0.1", port = "7350", useSSL = false) {
         this.client = new Client("defaultkey", host, port, useSSL);
@@ -89,16 +93,26 @@ export class NakamaService {
                     if (md.op_code === OP_BLOCK_UPDATE) {
                         const blk = payload as { gx: number; gz: number; blockId: number; r: number; g: number; b: number; a: number };
                         this.onBlockUpdate?.(blk.gx, blk.gz, blk.blockId, blk.r ?? 255, blk.g ?? 255, blk.b ?? 255, blk.a ?? 255);
+                    } else if (md.op_code === OP_AOI_ENTER) {
+                        const e = payload as { sessionId: string; x: number; z: number; ry?: number; textureUrl?: string };
+                        console.log(`[recv:AOI_ENTER] sid=${e.sessionId} x=${e.x} z=${e.z} tex=${e.textureUrl ?? ""}`);
+                        this.onAOIEnter?.(e.sessionId, e.x, e.z, e.ry ?? 0, e.textureUrl ?? "");
+                    } else if (md.op_code === OP_AOI_LEAVE) {
+                        const e = payload as { sessionId: string };
+                        console.log(`[recv:AOI_LEAVE] sid=${e.sessionId}`);
+                        this.onAOILeave?.(e.sessionId);
                     } else if (!sid) {
                         return;
                     } else if (md.op_code === OP_INIT_POS) {
                         const pos = payload as { x: number; z: number; ry?: number };
+                        console.log(`[recv:INIT_POS] sid=${sid} x=${pos.x} z=${pos.z} ry=${pos.ry ?? 0}`);
                         this.onAvatarInitPos?.(sid, pos.x, pos.z, pos.ry ?? 0);
                     } else if (md.op_code === OP_MOVE_TARGET) {
                         const pos = payload as { x: number; z: number };
                         this.onAvatarMoveTarget?.(sid, pos.x, pos.z);
                     } else if (md.op_code === OP_AVATAR_CHANGE) {
                         const av = payload as { textureUrl: string };
+                        console.log(`[recv:AVATAR_CHANGE] sid=${sid} tex=${av.textureUrl}`);
                         this.onAvatarChange?.(sid, av.textureUrl);
                     }
                 } catch { /* ignore */ }
@@ -114,6 +128,7 @@ export class NakamaService {
     }
 
     async sendAvatarChange(textureUrl: string): Promise<void> {
+        console.log(`[sendAvatarChange] textureUrl=${textureUrl}`);
         if (!this.socket || !this.matchId) return;
         try {
             await this.socket.sendMatchState(this.matchId, OP_AVATAR_CHANGE, JSON.stringify({ textureUrl }));
@@ -269,6 +284,20 @@ export class NakamaService {
             return Math.round(performance.now() - t0);
         } catch {
             return null;
+        }
+    }
+
+    // 全プレイヤーのAOI情報を取得
+    async getPlayersAOI(): Promise<{ sessionId: string; username: string; minCX: number; minCZ: number; maxCX: number; maxCZ: number; x: number; z: number }[]> {
+        if (!this.session) return [];
+        try {
+            const result = await this.client.rpc(this.session, "getPlayersAOI", "" as unknown as object);
+            if (!result?.payload) return [];
+            const raw = typeof result.payload === "string" ? result.payload : JSON.stringify(result.payload);
+            const data = JSON.parse(raw) as { players?: { sessionId: string; username: string; minCX: number; minCZ: number; maxCX: number; maxCZ: number; x: number; z: number }[] };
+            return data.players ?? [];
+        } catch {
+            return [];
         }
     }
 }

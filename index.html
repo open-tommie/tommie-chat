@@ -1315,6 +1315,21 @@
                 </select>
             </td></tr>
             <tr><td class="label" title="28d.AOI&#10;Area of Interest（チャンク範囲）&#10;minCX,minCZ〜maxCX,maxCZ&#10;AOI半径に応じて自動計算されるチャンク受信範囲">28d.AOI:</td><td class="value" id="val-aoi" style="font-size: 11px;">-</td></tr>
+            <tr><td class="label" title="28e.AOI表示&#10;AOI範囲を緑色の矩形でワールド上に表示&#10;デフォルト: ON">28e.AOI表示:</td><td class="value">
+                <button id="aoiVisBtn" class="debug-btn">On</button>
+            </td></tr>
+            <tr><td class="label" title="28f.カメラ自動回転&#10;移動方向に合わせてカメラアングルを自動回転&#10;デフォルト: ON">28f.Cam AutoRot:</td><td class="value">
+                <button id="camAutoRotBtn" class="debug-btn">On</button>
+            </td></tr>
+            <tr><td class="label" title="28g.AOI test (North Up)&#10;AOIテスト用ビュー:&#10;・カメラを真上から見下ろし、画面上=北(-Z)&#10;・AOIが画面に収まるズーム&#10;・AOI表示=ON&#10;・カメラ自動回転=OFF&#10;・他プレイヤーAOI表示=ON&#10;・雲=OFF">28g.AOI test:</td><td class="value">
+                <button id="eastUpBtn" class="debug-btn">Go</button>
+            </td></tr>
+            <tr><td class="label" title="28h.他プレイヤーAOI表示&#10;他プレイヤーのAOI範囲を半透明緑の立方体で表示&#10;2秒ごとにサーバから取得して更新&#10;デフォルト: OFF">28h.Remote AOI:</td><td class="value">
+                <button id="remoteAoiBtn" class="debug-btn off">Off</button>
+            </td></tr>
+            <tr><td class="label" title="28i.雲の表示&#10;雲メッシュの表示/非表示を切り替え&#10;デフォルト: ON">28i.Cloud:</td><td class="value">
+                <button id="cloudToggleBtn" class="debug-btn">On</button>
+            </td></tr>
             <tr><td class="label" title="29.Cam Info&#10;カメラのα（水平回転角）, β（垂直仰角）, r（プレイヤーからの距離）&#10;初期値: α=90°, β=67°, r=10&#10;典型的なMMO: β=45〜80°, r=5〜20&#10;Minecraft: F3でFacing方向（N/S/E/W）と回転角（Yaw/Pitch）表示">29.Cam Info:</td><td class="value" id="val-cam-info" style="font-size: 11px;">0°, 0°, 0.0</td></tr>
             <tr><td class="label" title="29b.MaxZoom&#10;マウスホイールでズームアウトできる最大距離（upperRadiusLimit）&#10;初期値: 200&#10;大きいほど遠くまで引ける">29b.MaxZoom:</td><td class="value">
                 <select id="maxZoomSelect" class="debug-select">

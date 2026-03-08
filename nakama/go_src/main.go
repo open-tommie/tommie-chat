@@ -23,8 +23,13 @@ const (
 	chunkSize               = 16 // 1チャンク = 16x16セル
 	chunkCount              = 64 // 64x64チャンク
 	worldSize               = chunkSize * chunkCount // 1024x1024セル
-	opBlockUpdate     int64 = 4
-	opAOIUpdate       int64 = 5
+	opInitPos      int64 = 1
+	opMoveTarget   int64 = 2
+	opAvatarChange int64 = 3
+	opBlockUpdate  int64 = 4
+	opAOIUpdate    int64 = 5
+	opAOIEnter     int64 = 6 // AOI内に入ったプレイヤー情報
+	opAOILeave     int64 = 7 // AOI外に出たプレイヤー通知
 )
 
 // 地面セル: blockID (uint16) + RGBA 各1バイト
@@ -204,10 +209,19 @@ func (a *playerAOI) containsChunk(cx, cz int) bool {
 	return cx >= a.MinCX && cx <= a.MaxCX && cz >= a.MinCZ && cz <= a.MaxCZ
 }
 
+// playerPos はプレイヤーの最新位置（チャンク座標）
+type playerPos struct {
+	CX, CZ     int    // チャンク座標
+	X, Z       float64 // ワールド座標
+	RY         float64 // 回転
+	TextureUrl string // アバターテクスチャ
+}
+
 // matchState はマッチの状態（プレイヤーごとのAOI管理）
 type matchState struct {
 	AOIs      map[string]*playerAOI      // sessionID -> AOI
 	Presences map[string]runtime.Presence // sessionID -> Presence
+	Positions map[string]*playerPos      // sessionID -> 位置
 }
 
 // worldMatch は Nakama マッチハンドラの実装
@@ -217,6 +231,7 @@ func (m *worldMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *s
 	return &matchState{
 		AOIs:      make(map[string]*playerAOI),
 		Presences: make(map[string]runtime.Presence),
+		Positions: make(map[string]*playerPos),
 	}, 10, "world"
 }
 
@@ -230,6 +245,7 @@ func (m *worldMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *s
 		sid := p.GetSessionId()
 		ms.AOIs[sid] = &playerAOI{0, 0, chunkCount - 1, chunkCount - 1}
 		ms.Presences[sid] = p
+		ms.Positions[sid] = &playerPos{CX: 0, CZ: 0, X: 0, Z: 0, RY: 0, TextureUrl: ""}
 	}
 	return ms
 }
@@ -240,14 +256,34 @@ func (m *worldMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *
 		sid := p.GetSessionId()
 		delete(ms.AOIs, sid)
 		delete(ms.Presences, sid)
+		delete(ms.Positions, sid)
 	}
 	return ms
+}
+
+// collectAOITargets は送信者のチャンク位置(cx,cz)がAOI内にある他プレイヤーを収集する
+// AOI未登録のプレイヤーは全体可視とみなす（参加直後でまだsendAOIしていない場合）
+func (ms *matchState) collectAOITargets(senderSID string, cx, cz int) []runtime.Presence {
+	var targets []runtime.Presence
+	for sid, p := range ms.Presences {
+		if sid == senderSID {
+			continue // 送信者自身はスキップ（reliable=true で自動受信）
+		}
+		aoi, hasAOI := ms.AOIs[sid]
+		if !hasAOI || aoi.containsChunk(cx, cz) {
+			targets = append(targets, p)
+		}
+	}
+	return targets
 }
 
 func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, messages []runtime.MatchData) interface{} {
 	ms := state.(*matchState)
 	for _, msg := range messages {
-		if msg.GetOpCode() == opAOIUpdate {
+		sid := msg.GetSessionId()
+		op := msg.GetOpCode()
+
+		if op == opAOIUpdate {
 			// AOI更新: {"minCX":0,"minCZ":0,"maxCX":15,"maxCZ":15}
 			var aoi struct {
 				MinCX int `json:"minCX"`
@@ -255,18 +291,178 @@ func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *s
 				MaxCX int `json:"maxCX"`
 				MaxCZ int `json:"maxCZ"`
 			}
-			if err := json.Unmarshal(msg.GetData(), &aoi); err == nil {
-				// クランプ
-				if aoi.MinCX < 0 { aoi.MinCX = 0 }
-				if aoi.MinCZ < 0 { aoi.MinCZ = 0 }
-				if aoi.MaxCX >= chunkCount { aoi.MaxCX = chunkCount - 1 }
-				if aoi.MaxCZ >= chunkCount { aoi.MaxCZ = chunkCount - 1 }
-				ms.AOIs[msg.GetSessionId()] = &playerAOI{aoi.MinCX, aoi.MinCZ, aoi.MaxCX, aoi.MaxCZ}
+			if err := json.Unmarshal(msg.GetData(), &aoi); err != nil {
+				continue
+			}
+			// クランプ
+			if aoi.MinCX < 0 { aoi.MinCX = 0 }
+			if aoi.MinCZ < 0 { aoi.MinCZ = 0 }
+			if aoi.MaxCX >= chunkCount { aoi.MaxCX = chunkCount - 1 }
+			if aoi.MaxCZ >= chunkCount { aoi.MaxCZ = chunkCount - 1 }
+
+			oldAOI := ms.AOIs[sid]
+			newAOI := &playerAOI{aoi.MinCX, aoi.MinCZ, aoi.MaxCX, aoi.MaxCZ}
+			ms.AOIs[sid] = newAOI
+
+			// AOI変更時: 新しいAOI内に入ったプレイヤーの情報を通知
+			senderPresence, hasSender := ms.Presences[sid]
+			if !hasSender {
+				continue
+			}
+			for otherSID, otherPos := range ms.Positions {
+				if otherSID == sid {
+					continue
+				}
+				wasVisible := oldAOI != nil && oldAOI.containsChunk(otherPos.CX, otherPos.CZ)
+				nowVisible := newAOI.containsChunk(otherPos.CX, otherPos.CZ)
+				if nowVisible && !wasVisible {
+					// このプレイヤーが新しく見えるようになった → OP_AOI_ENTER を送信
+					fmt.Printf("[send:AOI_ENTER] to=%s target=%s x=%.1f z=%.1f tex=%s (aoiChange)\n", sid, otherSID, otherPos.X, otherPos.Z, otherPos.TextureUrl)
+					enterData, _ := json.Marshal(map[string]interface{}{
+						"sessionId":  otherSID,
+						"x":          otherPos.X,
+						"z":          otherPos.Z,
+						"ry":         otherPos.RY,
+						"textureUrl": otherPos.TextureUrl,
+					})
+					dispatcher.BroadcastMessage(opAOIEnter, enterData, []runtime.Presence{senderPresence}, nil, true)
+				} else if wasVisible && !nowVisible {
+					// このプレイヤーがAOI外に出た → OP_AOI_LEAVE を送信
+					fmt.Printf("[send:AOI_LEAVE] to=%s target=%s (aoiChange)\n", sid, otherSID)
+					leaveData, _ := json.Marshal(map[string]interface{}{
+						"sessionId": otherSID,
+					})
+					dispatcher.BroadcastMessage(opAOILeave, leaveData, []runtime.Presence{senderPresence}, nil, true)
+				}
 			}
 			continue
 		}
-		// その他のメッセージ（移動・アバター等）は全員にブロードキャスト
-		if err := dispatcher.BroadcastMessage(msg.GetOpCode(), msg.GetData(), nil, msg, true); err != nil {
+
+		if op == opInitPos {
+			// 初期位置: {"x":..., "z":..., "ry":...}
+			var pos struct {
+				X  float64 `json:"x"`
+				Z  float64 `json:"z"`
+				RY float64 `json:"ry"`
+			}
+			if err := json.Unmarshal(msg.GetData(), &pos); err == nil {
+				half := float64(worldSize) / 2
+				cx := int((pos.X + half) / chunkSize)
+				cz := int((pos.Z + half) / chunkSize)
+				if cx < 0 { cx = 0 }
+				if cz < 0 { cz = 0 }
+				if cx >= chunkCount { cx = chunkCount - 1 }
+				if cz >= chunkCount { cz = chunkCount - 1 }
+				if p, ok := ms.Positions[sid]; ok {
+					p.CX = cx; p.CZ = cz; p.X = pos.X; p.Z = pos.Z; p.RY = pos.RY
+				} else {
+					ms.Positions[sid] = &playerPos{CX: cx, CZ: cz, X: pos.X, Z: pos.Z, RY: pos.RY}
+				}
+			}
+			// 送信者のチャンク位置がAOI内のプレイヤーにだけ送信
+			if p, ok := ms.Positions[sid]; ok {
+				targets := ms.collectAOITargets(sid, p.CX, p.CZ)
+				fmt.Printf("[send:INIT_POS] from=%s x=%.1f z=%.1f chunk=(%d,%d) targets=%d\n", sid, p.X, p.Z, p.CX, p.CZ, len(targets))
+				if len(targets) > 0 {
+					dispatcher.BroadcastMessage(op, msg.GetData(), targets, msg, true)
+				}
+			}
+			continue
+		}
+
+		if op == opMoveTarget {
+			// 移動目標: {"x":..., "z":...}
+			var pos struct {
+				X float64 `json:"x"`
+				Z float64 `json:"z"`
+			}
+			if err := json.Unmarshal(msg.GetData(), &pos); err == nil {
+				half := float64(worldSize) / 2
+				oldCX, oldCZ := -1, -1
+				if p, ok := ms.Positions[sid]; ok {
+					oldCX, oldCZ = p.CX, p.CZ
+				}
+				cx := int((pos.X + half) / chunkSize)
+				cz := int((pos.Z + half) / chunkSize)
+				if cx < 0 { cx = 0 }
+				if cz < 0 { cz = 0 }
+				if cx >= chunkCount { cx = chunkCount - 1 }
+				if cz >= chunkCount { cz = chunkCount - 1 }
+				if p, ok := ms.Positions[sid]; ok {
+					p.CX = cx; p.CZ = cz; p.X = pos.X; p.Z = pos.Z
+				} else {
+					ms.Positions[sid] = &playerPos{CX: cx, CZ: cz, X: pos.X, Z: pos.Z}
+				}
+				// チャンクが変わった場合、新しいチャンクのAOIに入っている他プレイヤーに通知
+				if cx != oldCX || cz != oldCZ {
+					fmt.Printf("[send:MOVE_TARGET] from=%s chunk=(%d,%d)->(%d,%d)\n", sid, oldCX, oldCZ, cx, cz)
+					for otherSID, otherAOI := range ms.AOIs {
+						if otherSID == sid {
+							continue
+						}
+						wasVisible := oldCX >= 0 && otherAOI.containsChunk(oldCX, oldCZ)
+						nowVisible := otherAOI.containsChunk(cx, cz)
+						if nowVisible && !wasVisible {
+							// 他プレイヤーのAOIに自分が入った → OP_AOI_ENTER
+							if otherP, ok := ms.Presences[otherSID]; ok {
+								myPos := ms.Positions[sid]
+								fmt.Printf("[send:AOI_ENTER] to=%s target=%s x=%.1f z=%.1f tex=%s (move)\n", otherSID, sid, myPos.X, myPos.Z, myPos.TextureUrl)
+								enterData, _ := json.Marshal(map[string]interface{}{
+									"sessionId":  sid,
+									"x":          myPos.X,
+									"z":          myPos.Z,
+									"ry":         myPos.RY,
+									"textureUrl": myPos.TextureUrl,
+								})
+								dispatcher.BroadcastMessage(opAOIEnter, enterData, []runtime.Presence{otherP}, nil, true)
+							}
+						} else if wasVisible && !nowVisible {
+							// 他プレイヤーのAOIから自分が出た → OP_AOI_LEAVE
+							if otherP, ok := ms.Presences[otherSID]; ok {
+								fmt.Printf("[send:AOI_LEAVE] to=%s target=%s (move)\n", otherSID, sid)
+								leaveData, _ := json.Marshal(map[string]interface{}{
+									"sessionId": sid,
+								})
+								dispatcher.BroadcastMessage(opAOILeave, leaveData, []runtime.Presence{otherP}, nil, true)
+							}
+						}
+					}
+				}
+			}
+			// AOIフィルタ: 送信者のチャンク位置が受信者のAOI内の場合のみ送信
+			if p, ok := ms.Positions[sid]; ok {
+				targets := ms.collectAOITargets(sid, p.CX, p.CZ)
+				if len(targets) > 0 {
+					dispatcher.BroadcastMessage(op, msg.GetData(), targets, msg, true)
+				}
+			}
+			continue
+		}
+
+		if op == opAvatarChange {
+			// アバター変更: {"textureUrl":...}
+			var av struct {
+				TextureUrl string `json:"textureUrl"`
+			}
+			if err := json.Unmarshal(msg.GetData(), &av); err == nil {
+				fmt.Printf("[avatarChange] sid=%s textureUrl=%s\n", sid, av.TextureUrl)
+				if p, ok := ms.Positions[sid]; ok {
+					p.TextureUrl = av.TextureUrl
+				}
+			}
+			// 保存済みの位置でAOIフィルタ
+			if p, ok := ms.Positions[sid]; ok {
+				targets := ms.collectAOITargets(sid, p.CX, p.CZ)
+				fmt.Printf("[send:AVATAR_CHANGE] from=%s tex=%s targets=%d\n", sid, av.TextureUrl, len(targets))
+				if len(targets) > 0 {
+					dispatcher.BroadcastMessage(op, msg.GetData(), targets, msg, true)
+				}
+			}
+			continue
+		}
+
+		// その他のメッセージは全員にブロードキャスト
+		if err := dispatcher.BroadcastMessage(op, msg.GetData(), nil, msg, true); err != nil {
 			logger.Warn("BroadcastMessage error: %v", err)
 		}
 	}
@@ -279,18 +475,29 @@ func (m *worldMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, 
 
 func (m *worldMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, data string) (interface{}, string) {
 	ms := state.(*matchState)
+
+	// シグナルタイプをルーティング
+	var sig struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal([]byte(data), &sig); err == nil && sig.Type != "" {
+		switch sig.Type {
+		case "getPlayersAOI":
+			return m.handleGetPlayersAOI(ms, data)
+		}
+	}
+
+	// デフォルト: ブロック更新シグナル
 	var blk struct {
 		GX int `json:"gx"`
 		GZ int `json:"gz"`
 	}
 	if err := json.Unmarshal([]byte(data), &blk); err != nil {
-		// パース失敗時は全員に送信
 		dispatcher.BroadcastMessage(opBlockUpdate, []byte(data), nil, nil, false)
 		return ms, data
 	}
 	cx := blk.GX / chunkSize
 	cz := blk.GZ / chunkSize
-	// AOI内のプレイヤーだけに送信
 	var targets []runtime.Presence
 	for sid, aoi := range ms.AOIs {
 		if aoi.containsChunk(cx, cz) {
@@ -308,10 +515,63 @@ func (m *worldMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db 
 	return ms, data
 }
 
+// handleGetPlayersAOI は全プレイヤーのAOI情報を返す
+func (m *worldMatch) handleGetPlayersAOI(ms *matchState, data string) (interface{}, string) {
+	type aoiEntry struct {
+		SessionID  string  `json:"sessionId"`
+		Username   string  `json:"username"`
+		MinCX      int     `json:"minCX"`
+		MinCZ      int     `json:"minCZ"`
+		MaxCX      int     `json:"maxCX"`
+		MaxCZ      int     `json:"maxCZ"`
+		X          float64 `json:"x"`
+		Z          float64 `json:"z"`
+	}
+	var entries []aoiEntry
+	for sid, aoi := range ms.AOIs {
+		p, ok := ms.Presences[sid]
+		if !ok {
+			continue
+		}
+		var x, z float64
+		if pos, ok := ms.Positions[sid]; ok {
+			x = pos.X
+			z = pos.Z
+		}
+		entries = append(entries, aoiEntry{
+			SessionID: sid,
+			Username:  p.GetUsername(),
+			MinCX:     aoi.MinCX,
+			MinCZ:     aoi.MinCZ,
+			MaxCX:     aoi.MaxCX,
+			MaxCZ:     aoi.MaxCZ,
+			X:         x,
+			Z:         z,
+		})
+	}
+	result, _ := json.Marshal(map[string]interface{}{"players": entries})
+	return ms, string(result)
+}
+
 // rpcPing はクライアントのラウンドトリップ時間計測用 RPC
 func rpcPing(_ context.Context, _ runtime.Logger, _ *sql.DB, _ runtime.NakamaModule, _ string) (string, error) {
 	fmt.Println("[ping]")
 	return "{}", nil
+}
+
+// rpcGetPlayersAOI は全プレイヤーのAOI情報を返す（MatchSignal経由）
+func rpcGetPlayersAOI(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	matches, err := nk.MatchList(ctx, 1, true, "world", nil, nil, "")
+	if err != nil || len(matches) == 0 {
+		return `{"players":[]}`, nil
+	}
+	sigData, _ := json.Marshal(map[string]string{"type": "getPlayersAOI"})
+	result, err := nk.MatchSignal(ctx, matches[0].GetMatchId(), string(sigData))
+	if err != nil {
+		logger.Warn("getPlayersAOI MatchSignal error: %v", err)
+		return `{"players":[]}`, nil
+	}
+	return result, nil
 }
 
 type blockReq struct {
@@ -618,6 +878,9 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 		return err
 	}
 	if err := initializer.RegisterRpc("syncChunks", rpcSyncChunks); err != nil {
+		return err
+	}
+	if err := initializer.RegisterRpc("getPlayersAOI", rpcGetPlayersAOI); err != nil {
 		return err
 	}
 
