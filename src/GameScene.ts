@@ -24,6 +24,17 @@ import { GridMaterial } from "@babylonjs/materials";
 import { AdvancedDynamicTexture, TextBlock, Rectangle } from "@babylonjs/gui";
 import "@babylonjs/loaders";
 import { NakamaService } from "./NakamaService";
+import { loadAllChunks, saveChunks, ChunkRecord } from "./ChunkDB";
+
+// FNV-1a 64bit ハッシュ（サーバ側 Go の hash/fnv と同一アルゴリズム）
+function fnv1a64(data: Uint8Array): bigint {
+    let h = 0xcbf29ce484222325n;
+    for (let i = 0; i < data.length; i++) {
+        h ^= BigInt(data[i]);
+        h = BigInt.asUintN(64, h * 0x100000001b3n);
+    }
+    return h;
+}
 
 export class GameScene {
     private engine: Engine;
@@ -63,8 +74,26 @@ export class GameScene {
     private static readonly CHUNK_SIZE = 16;
     private static readonly CHUNK_COUNT = 16;
     private static readonly WORLD_SIZE = 256; // CHUNK_SIZE * CHUNK_COUNT
-    // 6バイト/セル: [lo,hi,R,G,B,A] where lo|hi<<8 = blockId
-    private groundTable = new Uint8Array(256 * 256 * 6);
+    // チャンク構造体: 6バイト/セル のデータ + FNV-1a 64bit ハッシュ
+    private chunks: { cells: Uint8Array; hash: bigint }[][] = (() => {
+        const CS = 16;
+        const CC = 16;
+        const arr: { cells: Uint8Array; hash: bigint }[][] = [];
+        for (let cx = 0; cx < CC; cx++) {
+            arr[cx] = [];
+            for (let cz = 0; cz < CC; cz++) {
+                arr[cx][cz] = { cells: new Uint8Array(CS * CS * 6), hash: 0n };
+            }
+        }
+        return arr;
+    })();
+    // IndexedDB保存時のハッシュ（ログアウト時に差分検出用）
+    private dbHashes: string[][] = (() => {
+        const arr: string[][] = [];
+        for (let cx = 0; cx < 16; cx++) { arr[cx] = []; for (let cz = 0; cz < 16; cz++) arr[cx][cz] = "0"; }
+        return arr;
+    })();
+    private currentUserId: string | null = null;
     private blockMeshes = new Map<number, Mesh>();
     private blockMatCache = new Map<string, StandardMaterial>();
     private buildMode = false;
@@ -156,6 +185,51 @@ export class GameScene {
         this.scene.fogStart = 30.0; 
         this.scene.fogEnd = this.camera.maxZ; 
 
+    }
+
+    // IndexedDBからチャンクをメモリに復元（ログイン後）
+    private async loadChunksFromDB(userId: string): Promise<void> {
+        const CS = GameScene.CHUNK_SIZE;
+        const CC = GameScene.CHUNK_COUNT;
+        try {
+            const records = await loadAllChunks(userId);
+            for (const rec of records) {
+                const parts = rec.key.split("_");
+                if (parts.length !== 2) continue;
+                const cx = parseInt(parts[0], 10);
+                const cz = parseInt(parts[1], 10);
+                if (cx < 0 || cx >= CC || cz < 0 || cz >= CC) continue;
+                if (rec.cells.length !== CS * CS * 6) continue;
+                this.chunks[cx][cz].cells.set(rec.cells);
+                this.chunks[cx][cz].hash = BigInt(rec.hash || "0");
+                this.dbHashes[cx][cz] = rec.hash || "0";
+            }
+            console.log(`[ChunkDB] loaded ${records.length} chunks from IndexedDB (user=${userId})`);
+        } catch (e) {
+            console.warn("[ChunkDB] load failed:", e);
+        }
+    }
+
+    // ログアウト時にハッシュが変わったチャンクだけIndexedDBに保存
+    private saveChunksToDB(): void {
+        const userId = this.currentUserId;
+        if (!userId) return;
+        const CC = GameScene.CHUNK_COUNT;
+        const dirty: ChunkRecord[] = [];
+        for (let cx = 0; cx < CC; cx++) {
+            for (let cz = 0; cz < CC; cz++) {
+                const ch = this.chunks[cx][cz];
+                const hashStr = ch.hash.toString();
+                if (hashStr !== this.dbHashes[cx][cz]) {
+                    dirty.push({ key: `${cx}_${cz}`, cells: new Uint8Array(ch.cells), hash: hashStr });
+                    this.dbHashes[cx][cz] = hashStr;
+                }
+            }
+        }
+        if (dirty.length > 0) {
+            saveChunks(userId, dirty).then(() => console.log(`[ChunkDB] saved ${dirty.length} chunks`))
+                .catch(e => console.warn("[ChunkDB] save failed:", e));
+        }
     }
 
     private setupHtmlUI(): void {
@@ -867,47 +941,68 @@ export class GameScene {
             if (loginBtn)    loginBtn.disabled = true;
             try {
                 await this.nakama.login(name, host, port);
+                this.currentUserId = this.nakama.getSession()?.user_id ?? null;
+                await this.loadChunksFromDB(this.currentUserId ?? "anonymous");
                 await this.nakama.joinWorldMatch();
 
                 // ブロック更新通知の受信
                 this.nakama.onBlockUpdate = (gx, gz, blockId, r, g, b, a) => {
                     console.log(`[onBlockUpdate] gx=${gx} gz=${gz} blockId=${blockId} rgb=(${r},${g},${b})`);
-                    const W = GameScene.WORLD_SIZE;
-                    const base = (gx * W + gz) * 6;
-                    this.groundTable[base]   = blockId & 0xFF;
-                    this.groundTable[base+1] = (blockId >> 8) & 0xFF;
-                    this.groundTable[base+2] = r; this.groundTable[base+3] = g;
-                    this.groundTable[base+4] = b; this.groundTable[base+5] = a;
+                    const CS = GameScene.CHUNK_SIZE;
+                    const cx = Math.floor(gx / CS), cz = Math.floor(gz / CS);
+                    const lx = gx % CS, lz = gz % CS;
+                    const si = (lx * CS + lz) * 6;
+                    const ch = this.chunks[cx][cz];
+                    ch.cells[si]   = blockId & 0xFF;
+                    ch.cells[si+1] = (blockId >> 8) & 0xFF;
+                    ch.cells[si+2] = r; ch.cells[si+3] = g;
+                    ch.cells[si+4] = b; ch.cells[si+5] = a;
+                    ch.hash = fnv1a64(ch.cells);
                     this.placeBlock(gx, gz, blockId, r, g, b, a);
                 };
 
-                // 初期地面テーブルをチャンク単位でサーバから取得して反映
+                // ハッシュ差分で必要なチャンクだけサーバから取得
                 {
                     const CS = GameScene.CHUNK_SIZE;
                     const CC = GameScene.CHUNK_COUNT;
-                    const W = GameScene.WORLD_SIZE;
-                    const promises: Promise<void>[] = [];
+                    // IndexedDB にあるチャンクのブロックをまず描画
                     for (let cx = 0; cx < CC; cx++) {
                         for (let cz = 0; cz < CC; cz++) {
-                            promises.push(this.nakama.getGroundChunk(cx, cz).then(chunk => {
-                                if (!chunk || chunk.table.length !== CS * CS * 6) return;
-                                const baseGX = cx * CS;
-                                const baseGZ = cz * CS;
-                                for (let lx = 0; lx < CS; lx++) {
-                                    for (let lz = 0; lz < CS; lz++) {
-                                        const si = (lx * CS + lz) * 6;
-                                        const gx = baseGX + lx;
-                                        const gz = baseGZ + lz;
-                                        const di = (gx * W + gz) * 6;
-                                        for (let k = 0; k < 6; k++) this.groundTable[di + k] = chunk.table[si + k];
-                                        const blockId = chunk.table[si] | (chunk.table[si + 1] << 8);
-                                        if (blockId !== 0) this.placeBlock(gx, gz, blockId, chunk.table[si + 2], chunk.table[si + 3], chunk.table[si + 4], chunk.table[si + 5]);
-                                    }
+                            const ch = this.chunks[cx][cz];
+                            const baseGX = cx * CS, baseGZ = cz * CS;
+                            for (let lx = 0; lx < CS; lx++) {
+                                for (let lz = 0; lz < CS; lz++) {
+                                    const si = (lx * CS + lz) * 6;
+                                    const blockId = ch.cells[si] | (ch.cells[si + 1] << 8);
+                                    if (blockId !== 0) this.placeBlock(baseGX + lx, baseGZ + lz, blockId, ch.cells[si + 2], ch.cells[si + 3], ch.cells[si + 4], ch.cells[si + 5]);
                                 }
-                            }).catch(() => {}));
+                            }
                         }
                     }
-                    Promise.all(promises).catch(() => {});
+                    // サーバと差分同期
+                    const hashes: string[] = [];
+                    for (let cx = 0; cx < CC; cx++)
+                        for (let cz = 0; cz < CC; cz++)
+                            hashes.push(this.chunks[cx][cz].hash.toString());
+                    this.nakama.syncChunks(hashes).then(diffs => {
+                        for (const d of diffs) {
+                            if (d.table.length !== CS * CS * 6) continue;
+                            const ch = this.chunks[d.cx][d.cz];
+                            const baseGX = d.cx * CS, baseGZ = d.cz * CS;
+                            for (let lx = 0; lx < CS; lx++) {
+                                for (let lz = 0; lz < CS; lz++) {
+                                    const si = (lx * CS + lz) * 6;
+                                    for (let k = 0; k < 6; k++) ch.cells[si + k] = d.table[si + k];
+                                    const blockId = d.table[si] | (d.table[si + 1] << 8);
+                                    const gx = baseGX + lx, gz = baseGZ + lz;
+                                    if (blockId !== 0) this.placeBlock(gx, gz, blockId, d.table[si + 2], d.table[si + 3], d.table[si + 4], d.table[si + 5]);
+                                    else this.placeBlock(gx, gz, 0, 0, 0, 0, 0);
+                                }
+                            }
+                            ch.hash = BigInt(d.hash || "0");
+                        }
+                        console.log(`[syncChunks] updated ${diffs.length}/${CC * CC} chunks`);
+                    }).catch(() => {});
                 }
 
                 // 自分の初期位置を全員へ送信
@@ -1252,7 +1347,9 @@ export class GameScene {
             const host = srvUrlInput?.value.trim()  || "127.0.0.1";
             const port = srvPortInput?.value.trim() || "7350";
             stopPing();
+            this.saveChunksToDB();
             this.nakama.logout();
+            this.currentUserId = null;
             addServerLog(host, port, "ログアウト");
             userMap.clear();
             renderUserList();
@@ -1775,8 +1872,11 @@ export class GameScene {
                     const gx = Math.floor(pick.pickedPoint.x + half);
                     const gz = Math.floor(pick.pickedPoint.z + half);
                     if (gx >= 0 && gx < GameScene.WORLD_SIZE && gz >= 0 && gz < GameScene.WORLD_SIZE) {
-                        const base = (gx * GameScene.WORLD_SIZE + gz) * 6;
-                        const curId = this.groundTable[base] | (this.groundTable[base+1] << 8);
+                        const CS = GameScene.CHUNK_SIZE;
+                        const ccx = Math.floor(gx / CS), ccz = Math.floor(gz / CS);
+                        const clx = gx % CS, clz = gz % CS;
+                        const csi = (clx * CS + clz) * 6;
+                        const curId = this.chunks[ccx][ccz].cells[csi] | (this.chunks[ccx][ccz].cells[csi+1] << 8);
                         const blockId = curId === 0 ? 1 : 0;
                         const colorInput = document.getElementById("blockColorInput") as HTMLInputElement | null;
                         const hex = colorInput?.value ?? "#3366ff";

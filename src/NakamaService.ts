@@ -231,6 +231,17 @@ export class NakamaService {
         } catch { return null; }
     }
 
+    async syncChunks(hashes: string[]): Promise<{ cx: number; cz: number; hash: string; table: number[] }[]> {
+        if (!this.session) return [];
+        try {
+            const result = await this.client.rpc(this.session, "syncChunks", { hashes } as unknown as object);
+            if (!result?.payload) return [];
+            const raw = typeof result.payload === "string" ? result.payload : JSON.stringify(result.payload);
+            const data = JSON.parse(raw) as { chunks?: { cx: number; cz: number; hash: string; table: number[] }[] };
+            return data.chunks ?? [];
+        } catch { return []; }
+    }
+
     async getGroundChunk(cx: number, cz: number): Promise<{ cx: number; cz: number; table: number[] } | null> {
         if (!this.session) return null;
         try {

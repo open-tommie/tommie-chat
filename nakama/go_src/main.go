@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"strings"
 	"sync"
@@ -35,6 +36,22 @@ type blockData struct {
 type chunk struct {
 	mu    sync.RWMutex
 	cells [chunkSize][chunkSize]blockData
+	hash  uint64 // FNV-1a 64bit ハッシュ（setBlock更新時に再計算）
+}
+
+// calcHash: チャンクのFNV-1a 64bitハッシュを計算してhashメンバに格納。呼び出し元がLock保持
+func (ch *chunk) calcHash() {
+	h := fnv.New64a()
+	for lx := 0; lx < chunkSize; lx++ {
+		for lz := 0; lz < chunkSize; lz++ {
+			c := ch.cells[lx][lz]
+			h.Write([]byte{
+				uint8(c.BlockID & 0xFF), uint8(c.BlockID >> 8),
+				c.R, c.G, c.B, c.A,
+			})
+		}
+	}
+	ch.hash = h.Sum64()
 }
 
 // toFlat: 16x16 セルを 6バイト/セル (lo,hi,R,G,B,A) へ変換。呼び出し元がRLock保持
@@ -289,9 +306,10 @@ func rpcSetBlock(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runt
 	ch := &chunks[cx][cz]
 	ch.mu.Lock()
 	ch.cells[lx][lz] = blockData{BlockID: req.BlockID, R: req.R, G: req.G, B: req.B, A: a}
+	ch.calcHash()
 	ch.mu.Unlock()
 	saveChunkToStorage(ctx, nk, logger, cx, cz)
-	dumpGroundTableCSV(logger)
+	// dumpGroundTableCSV(logger)
 
 	// ワールドマッチへシグナル送信
 	matches, err := nk.MatchList(ctx, 1, true, "world", nil, nil, "")
@@ -366,6 +384,61 @@ func rpcGetGroundTable(_ context.Context, _ runtime.Logger, _ *sql.DB, _ runtime
 	return string(b), nil
 }
 
+// rpcSyncChunks はクライアントのハッシュと比較し、差分チャンクだけ返す
+// payload: {"hashes":["0","0",...]} (chunkCount*chunkCount個, 10進文字列, cx優先順)
+func rpcSyncChunks(_ context.Context, _ runtime.Logger, _ *sql.DB, _ runtime.NakamaModule, payload string) (string, error) {
+	var req struct {
+		Hashes []string `json:"hashes"`
+	}
+	if err := json.Unmarshal([]byte(payload), &req); err != nil {
+		return "", err
+	}
+	total := chunkCount * chunkCount
+	// ハッシュ数が足りない場合は 0 埋め
+	for len(req.Hashes) < total {
+		req.Hashes = append(req.Hashes, "0")
+	}
+
+	type chunkResp struct {
+		CX    int   `json:"cx"`
+		CZ    int   `json:"cz"`
+		Hash  string `json:"hash"`
+		Table []int  `json:"table"`
+	}
+	var diff []chunkResp
+
+	for cx := 0; cx < chunkCount; cx++ {
+		for cz := 0; cz < chunkCount; cz++ {
+			idx := cx*chunkCount + cz
+			ch := &chunks[cx][cz]
+			ch.mu.RLock()
+			serverHash := ch.hash
+			ch.mu.RUnlock()
+			clientHashStr := req.Hashes[idx]
+			serverHashStr := fmt.Sprintf("%d", serverHash)
+			if clientHashStr == serverHashStr {
+				continue
+			}
+			ch.mu.RLock()
+			flat := ch.toFlat()
+			h := ch.hash
+			ch.mu.RUnlock()
+			diff = append(diff, chunkResp{
+				CX:    cx,
+				CZ:    cz,
+				Hash:  fmt.Sprintf("%d", h),
+				Table: flatToInts(flat),
+			})
+		}
+	}
+	fmt.Printf("[syncChunks] sent=%d/%d\n", len(diff), total)
+	b, err := json.Marshal(map[string]interface{}{"chunks": diff})
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 // InitModule は Nakama プラグインのエントリポイント
 func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
 	// ストレージから地面テーブルを復元（チャンク単位）
@@ -393,6 +466,7 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 			ch := &chunks[cx][cz]
 			ch.mu.Lock()
 			ch.fromFlat(flat8)
+			ch.calcHash()
 			ch.mu.Unlock()
 			loadedChunks++
 		}
@@ -429,6 +503,7 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 				logger.Info("Migrated old ground_table (100x100) to chunk format")
 				for cx := 0; cx < chunkCount; cx++ {
 					for cz := 0; cz < chunkCount; cz++ {
+						chunks[cx][cz].calcHash()
 						saveChunkToStorage(ctx, nk, logger, cx, cz)
 					}
 				}
@@ -450,6 +525,7 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 					logger.Info("Migrated old ground_table (100x100, blockID only) to chunk format")
 					for cx := 0; cx < chunkCount; cx++ {
 						for cz := 0; cz < chunkCount; cz++ {
+							chunks[cx][cz].calcHash()
 							saveChunkToStorage(ctx, nk, logger, cx, cz)
 						}
 					}
@@ -483,6 +559,9 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 		return err
 	}
 	if err := initializer.RegisterRpc("getGroundChunk", rpcGetGroundChunk); err != nil {
+		return err
+	}
+	if err := initializer.RegisterRpc("syncChunks", rpcSyncChunks); err != nil {
 		return err
 	}
 
