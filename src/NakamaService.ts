@@ -231,6 +231,16 @@ export class NakamaService {
         } catch { return null; }
     }
 
+    async getGroundChunk(cx: number, cz: number): Promise<{ cx: number; cz: number; table: number[] } | null> {
+        if (!this.session) return null;
+        try {
+            const result = await this.client.rpc(this.session, "getGroundChunk", { cx, cz } as unknown as object);
+            if (!result?.payload) return null;
+            const raw = typeof result.payload === "string" ? result.payload : JSON.stringify(result.payload);
+            return JSON.parse(raw) as { cx: number; cz: number; table: number[] };
+        } catch { return null; }
+    }
+
     // サーバへの RPC ラウンドトリップ時間を計測する（ms）
     async measurePing(): Promise<number | null> {
         if (!this.session) return null;

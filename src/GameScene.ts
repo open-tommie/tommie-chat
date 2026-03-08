@@ -59,8 +59,12 @@ export class GameScene {
     private remoteSpeeches = new Map<string, (text: string) => void>();
 
     // ===== 地面ブロック =====
+    // 16x16チャンク × 16x16セル = 256x256セル
+    private static readonly CHUNK_SIZE = 16;
+    private static readonly CHUNK_COUNT = 16;
+    private static readonly WORLD_SIZE = 256; // CHUNK_SIZE * CHUNK_COUNT
     // 6バイト/セル: [lo,hi,R,G,B,A] where lo|hi<<8 = blockId
-    private groundTable = new Uint8Array(100 * 100 * 6);
+    private groundTable = new Uint8Array(256 * 256 * 6);
     private blockMeshes = new Map<number, Mesh>();
     private blockMatCache = new Map<string, StandardMaterial>();
     private buildMode = false;
@@ -868,7 +872,8 @@ export class GameScene {
                 // ブロック更新通知の受信
                 this.nakama.onBlockUpdate = (gx, gz, blockId, r, g, b, a) => {
                     console.log(`[onBlockUpdate] gx=${gx} gz=${gz} blockId=${blockId} rgb=(${r},${g},${b})`);
-                    const base = (gx * 100 + gz) * 6;
+                    const W = GameScene.WORLD_SIZE;
+                    const base = (gx * W + gz) * 6;
                     this.groundTable[base]   = blockId & 0xFF;
                     this.groundTable[base+1] = (blockId >> 8) & 0xFF;
                     this.groundTable[base+2] = r; this.groundTable[base+3] = g;
@@ -876,18 +881,34 @@ export class GameScene {
                     this.placeBlock(gx, gz, blockId, r, g, b, a);
                 };
 
-                // 初期地面テーブルをサーバから取得して反映 (6バイト/セル)
-                this.nakama.getGroundTable().then(table => {
-                    if (!table || table.length !== 100 * 100 * 6) return;
-                    for (let i = 0; i < table.length; i++) this.groundTable[i] = table[i];
-                    for (let gx = 0; gx < 100; gx++) {
-                        for (let gz = 0; gz < 100; gz++) {
-                            const base = (gx * 100 + gz) * 6;
-                            const blockId = table[base] | (table[base+1] << 8);
-                            if (blockId !== 0) this.placeBlock(gx, gz, blockId, table[base+2], table[base+3], table[base+4], table[base+5]);
+                // 初期地面テーブルをチャンク単位でサーバから取得して反映
+                {
+                    const CS = GameScene.CHUNK_SIZE;
+                    const CC = GameScene.CHUNK_COUNT;
+                    const W = GameScene.WORLD_SIZE;
+                    const promises: Promise<void>[] = [];
+                    for (let cx = 0; cx < CC; cx++) {
+                        for (let cz = 0; cz < CC; cz++) {
+                            promises.push(this.nakama.getGroundChunk(cx, cz).then(chunk => {
+                                if (!chunk || chunk.table.length !== CS * CS * 6) return;
+                                const baseGX = cx * CS;
+                                const baseGZ = cz * CS;
+                                for (let lx = 0; lx < CS; lx++) {
+                                    for (let lz = 0; lz < CS; lz++) {
+                                        const si = (lx * CS + lz) * 6;
+                                        const gx = baseGX + lx;
+                                        const gz = baseGZ + lz;
+                                        const di = (gx * W + gz) * 6;
+                                        for (let k = 0; k < 6; k++) this.groundTable[di + k] = chunk.table[si + k];
+                                        const blockId = chunk.table[si] | (chunk.table[si + 1] << 8);
+                                        if (blockId !== 0) this.placeBlock(gx, gz, blockId, chunk.table[si + 2], chunk.table[si + 3], chunk.table[si + 4], chunk.table[si + 5]);
+                                    }
+                                }
+                            }).catch(() => {}));
                         }
                     }
-                }).catch(() => {});
+                    Promise.all(promises).catch(() => {});
+                }
 
                 // 自分の初期位置を全員へ送信
                 { const p = this.playerBox; this.nakama.sendInitPos(p.position.x, p.position.z, p.rotation.y).catch(() => {}); }
@@ -1558,19 +1579,20 @@ export class GameScene {
     }
 
     private placeBlock(gx: number, gz: number, blockId: number, r: number, g: number, b: number, a = 255): void {
-        const key = gx * 100 + gz;
+        const key = gx * GameScene.WORLD_SIZE + gz;
         const existing = this.blockMeshes.get(key);
         if (existing) { existing.dispose(); this.blockMeshes.delete(key); }
         if (blockId === 0) return;
+        const half = GameScene.WORLD_SIZE / 2;
         const box = MeshBuilder.CreateBox(`block_${gx}_${gz}`, { size: 1 }, this.scene);
-        box.position.set(gx - 50 + 0.5, 0.5, gz - 50 + 0.5);
+        box.position.set(gx - half + 0.5, 0.5, gz - half + 0.5);
         box.material = this.getOrCreateBlockMat(r, g, b, a);
         box.isPickable = false;
         this.blockMeshes.set(key, box);
     }
 
     private createObjects(): void {
-        const ground = MeshBuilder.CreateGround("ground", { width: 400, height: 400 }, this.scene);
+        const ground = MeshBuilder.CreateGround("ground", { width: GameScene.WORLD_SIZE, height: GameScene.WORLD_SIZE }, this.scene);
         const gridMaterial = new GridMaterial("gridMaterial", this.scene);
         gridMaterial.mainColor = new Color3(0.85, 0.95, 0.85);
         gridMaterial.lineColor = new Color3(0.35, 0.55, 0.35);
@@ -1749,10 +1771,11 @@ export class GameScene {
                 if (!this.buildMode) return;
                 const pick = this.scene.pick(this.scene.pointerX, this.scene.pointerY, (mesh) => mesh.name === "ground");
                 if (pick?.hit && pick.pickedPoint) {
-                    const gx = Math.floor(pick.pickedPoint.x + 50);
-                    const gz = Math.floor(pick.pickedPoint.z + 50);
-                    if (gx >= 0 && gx < 100 && gz >= 0 && gz < 100) {
-                        const base = (gx * 100 + gz) * 6;
+                    const half = GameScene.WORLD_SIZE / 2;
+                    const gx = Math.floor(pick.pickedPoint.x + half);
+                    const gz = Math.floor(pick.pickedPoint.z + half);
+                    if (gx >= 0 && gx < GameScene.WORLD_SIZE && gz >= 0 && gz < GameScene.WORLD_SIZE) {
+                        const base = (gx * GameScene.WORLD_SIZE + gz) * 6;
                         const curId = this.groundTable[base] | (this.groundTable[base+1] << 8);
                         const blockId = curId === 0 ? 1 : 0;
                         const colorInput = document.getElementById("blockColorInput") as HTMLInputElement | null;
