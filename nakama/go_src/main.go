@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
@@ -84,6 +85,8 @@ func groundTableFromFlatOld(old []uint16) {
 
 // rpcGetServerInfo はサーバ情報（ノード名・バージョン・起動時刻・プレイヤー数）を返す
 func rpcGetServerInfo(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	uid, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	fmt.Printf("[getServerInfo] uid=%s\n", uid)
 	playerCount, err := nk.StreamCount(streamModeChannel, "", "", chatRoomLabel)
 	if err != nil {
 		logger.Warn("StreamCount error: %v", err)
@@ -113,6 +116,8 @@ func rpcGetServerInfo(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 // rpcGetWorldMatch は稼働中の "world" マッチを探し、なければ新規作成して返す
 func rpcGetWorldMatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	uid, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	fmt.Printf("[getWorldMatch] uid=%s\n", uid)
 	matches, err := nk.MatchList(ctx, 1, true, "world", nil, nil, "")
 	if err != nil {
 		logger.Warn("MatchList failed: %v", err)
@@ -174,6 +179,7 @@ func (m *worldMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db 
 
 // rpcPing はクライアントのラウンドトリップ時間計測用 RPC
 func rpcPing(_ context.Context, _ runtime.Logger, _ *sql.DB, _ runtime.NakamaModule, _ string) (string, error) {
+	fmt.Println("[ping]")
 	return "{}", nil
 }
 
@@ -256,6 +262,7 @@ func rpcSetBlock(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runt
 	if err := json.Unmarshal([]byte(payload), &req); err != nil {
 		return "", err
 	}
+	fmt.Printf("[setBlock] gx=%d gz=%d blockId=%d r=%d g=%d b=%d a=%d\n", req.GX, req.GZ, req.BlockID, req.R, req.G, req.B, req.A)
 	if req.GX < 0 || req.GX >= groundSize || req.GZ < 0 || req.GZ >= groundSize {
 		return "", fmt.Errorf("setBlock: out of bounds gx=%d gz=%d", req.GX, req.GZ)
 	}
@@ -283,6 +290,7 @@ func rpcSetBlock(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runt
 
 // rpcGetGroundTable は現在の地面テーブルを6バイト/セルのフラット配列で返す
 func rpcGetGroundTable(_ context.Context, _ runtime.Logger, _ *sql.DB, _ runtime.NakamaModule, _ string) (string, error) {
+	fmt.Println("[getGroundTable]")
 	groundMu.RLock()
 	flat := groundTableToFlat()
 	groundMu.RUnlock()
@@ -348,6 +356,26 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 	if err := initializer.RegisterRpc("getGroundTable", rpcGetGroundTable); err != nil {
 		return err
 	}
+
+	// ログイン検知（認証成功後）
+	if err := initializer.RegisterAfterAuthenticateCustom(func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, out *api.Session, in *api.AuthenticateCustomRequest) error {
+		uid, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+		username, _ := ctx.Value(runtime.RUNTIME_CTX_USERNAME).(string)
+		fmt.Printf("[login] uid=%s username=%s customId=%s\n", uid, username, in.GetAccount().GetId())
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// ログアウト（セッション切断）検知
+	if err := initializer.RegisterEventSessionEnd(func(ctx context.Context, logger runtime.Logger, evt *api.Event) {
+		uid, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+		username, _ := ctx.Value(runtime.RUNTIME_CTX_USERNAME).(string)
+		fmt.Printf("[logout] uid=%s username=%s\n", uid, username)
+	}); err != nil {
+		return err
+	}
+
 	logger.Info("server_info module loaded")
 	return nil
 }
