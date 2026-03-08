@@ -157,6 +157,47 @@ export class GameScene {
         this.scene.fogEnd = this.camera.maxZ;
     }
 
+    // AOI変更時にAOI外のブロックメッシュを破棄し、AOI内のキャッシュ済みチャンクを描画
+    refreshBlocksForAOI(): void {
+        const aoi = this.aoiManager.lastAOI;
+        if (aoi.minCX < 0) return;
+        const CS = CHUNK_SIZE;
+        const WS = WORLD_SIZE;
+
+        // AOI外のブロックメッシュを破棄
+        for (const [key, mesh] of this.blockMeshes) {
+            const gx = Math.floor(key / WS);
+            const gz = key % WS;
+            const cx = Math.floor(gx / CS);
+            const cz = Math.floor(gz / CS);
+            if (cx < aoi.minCX || cx > aoi.maxCX || cz < aoi.minCZ || cz > aoi.maxCZ) {
+                mesh.dispose();
+                this.blockMeshes.delete(key);
+            }
+        }
+
+        // AOI内のキャッシュ済みチャンクでメッシュが無いブロックを描画
+        for (let cx = aoi.minCX; cx <= aoi.maxCX; cx++) {
+            for (let cz = aoi.minCZ; cz <= aoi.maxCZ; cz++) {
+                const ch = this.chunks.get(`${cx}_${cz}`);
+                if (!ch) continue;
+                const baseGX = cx * CS, baseGZ = cz * CS;
+                for (let lx = 0; lx < CS; lx++) {
+                    for (let lz = 0; lz < CS; lz++) {
+                        const gx = baseGX + lx, gz = baseGZ + lz;
+                        const mkey = gx * WS + gz;
+                        if (this.blockMeshes.has(mkey)) continue; // 既にメッシュあり
+                        const si = (lx * CS + lz) * 6;
+                        const blockId = ch.cells[si] | (ch.cells[si + 1] << 8);
+                        if (blockId !== 0) {
+                            this.placeBlock(gx, gz, blockId, ch.cells[si + 2], ch.cells[si + 3], ch.cells[si + 4], ch.cells[si + 5]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // AOI範囲内のチャンクをサーバと差分同期
     async syncAOIChunks(): Promise<void> {
         const CS = CHUNK_SIZE;
@@ -334,7 +375,7 @@ export class GameScene {
         this.aoiManager = new AOIManager(
             this.scene, this.nakama,
             () => ({ x: this.playerBox.position.x, z: this.playerBox.position.z }),
-            () => { this.syncAOIChunks().catch(() => {}); }
+            () => { this.refreshBlocksForAOI(); this.syncAOIChunks().catch(() => {}); }
         );
 
         // ネームタグ & 吹き出し
