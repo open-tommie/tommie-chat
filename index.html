@@ -1304,7 +1304,17 @@
             </td></tr>
             <tr><td class="label" title="28.Player Pos&#10;プレイヤーのワールド座標（X, Y, Z）&#10;初期値: 0.0, 0.0, 0.0（原点）&#10;典型的なMMO: ゾーン座標として使用&#10;Minecraft: F3デバッグ画面でXYZ座標表示（Y=64が海面レベル）">28.Player Pos:</td><td class="value" id="val-player-pos">0.0, 0.0, 0.0</td></tr>
             <tr><td class="label" title="28b.Chunk&#10;プレイヤーが現在いるチャンク座標（CX, CZ）&#10;ワールド座標からチャンク座標に変換&#10;0〜15の範囲">28b.Chunk:</td><td class="value" id="val-chunk">-</td></tr>
-            <tr><td class="label" title="28c.AOI&#10;Area of Interest（チャンク範囲）&#10;minCX,minCZ〜maxCX,maxCZ&#10;FarClipに応じて自動計算されるチャンク送受信範囲">28c.AOI:</td><td class="value" id="val-aoi" style="font-size: 11px;">-</td></tr>
+            <tr><td class="label" title="28c.AOI R&#10;AOI半径（セル単位）。ブロック更新の受信範囲&#10;FarClip（描画距離）とは独立&#10;小さいほどサーバ負荷が軽い&#10;初期値: 48（3チャンク分）">28c.AOI R:</td><td class="value">
+                <select id="aoiRadiusSelect" class="debug-select">
+                    <option value="16">16 (1ch)</option>
+                    <option value="32">32 (2ch)</option>
+                    <option value="48" selected>48 (3ch)</option>
+                    <option value="80">80 (5ch)</option>
+                    <option value="128">128 (8ch)</option>
+                    <option value="256">256 (全域)</option>
+                </select>
+            </td></tr>
+            <tr><td class="label" title="28d.AOI&#10;Area of Interest（チャンク範囲）&#10;minCX,minCZ〜maxCX,maxCZ&#10;AOI半径に応じて自動計算されるチャンク受信範囲">28d.AOI:</td><td class="value" id="val-aoi" style="font-size: 11px;">-</td></tr>
             <tr><td class="label" title="29.Cam Info&#10;カメラのα（水平回転角）, β（垂直仰角）, r（プレイヤーからの距離）&#10;初期値: α=90°, β=67°, r=10&#10;典型的なMMO: β=45〜80°, r=5〜20&#10;Minecraft: F3でFacing方向（N/S/E/W）と回転角（Yaw/Pitch）表示">29.Cam Info:</td><td class="value" id="val-cam-info" style="font-size: 11px;">0°, 0°, 0.0</td></tr>
             <tr><td class="label" title="29b.MaxZoom&#10;マウスホイールでズームアウトできる最大距離（upperRadiusLimit）&#10;初期値: 200&#10;大きいほど遠くまで引ける">29b.MaxZoom:</td><td class="value">
                 <select id="maxZoomSelect" class="debug-select">

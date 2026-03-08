@@ -95,6 +95,7 @@ export class GameScene {
     })();
     private currentUserId: string | null = null;
     // AOI（Area of Interest）: 現在のチャンク範囲
+    private aoiRadius = 48; // AOI半径（セル単位）。FarClipとは独立
     private lastAOI = { minCX: 0, minCZ: 0, maxCX: 15, maxCZ: 15 };
     private blockMeshes = new Map<number, Mesh>();
     private blockMatCache = new Map<string, StandardMaterial>();
@@ -189,14 +190,14 @@ export class GameScene {
 
     }
 
-    // AOI計算: プレイヤー位置とカメラfarClipからチャンク範囲を算出し、変化時にサーバへ送信
+    // AOI計算: プレイヤー位置とaoiRadius(固定半径)からチャンク範囲を算出し、変化時にサーバへ送信
     private updateAOI(): void {
         const half = GameScene.WORLD_SIZE / 2;
         const CS = GameScene.CHUNK_SIZE;
         const CC = GameScene.CHUNK_COUNT;
         const px = this.playerBox.position.x + half;
         const pz = this.playerBox.position.z + half;
-        const r = this.camera.maxZ;
+        const r = this.aoiRadius;
         const minCX = Math.max(0, Math.floor((px - r) / CS));
         const minCZ = Math.max(0, Math.floor((pz - r) / CS));
         const maxCX = Math.min(CC - 1, Math.floor((px + r) / CS));
@@ -2794,6 +2795,16 @@ export class GameScene {
                 if (!isNaN(val) && val > 0) {
                     this.camera.maxZ = val;
                     this.scene.fogEnd = val;
+                }
+            });
+        }
+
+        const aoiRadiusSelect = document.getElementById("aoiRadiusSelect") as HTMLSelectElement;
+        if (aoiRadiusSelect) {
+            aoiRadiusSelect.addEventListener("change", (e) => {
+                const val = parseInt((e.target as HTMLSelectElement).value, 10);
+                if (!isNaN(val) && val > 0) {
+                    this.aoiRadius = val;
                     this.updateAOI();
                 }
             });
