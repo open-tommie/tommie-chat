@@ -21,8 +21,8 @@ const (
 	streamModeChannel uint8 = 2
 	chatRoomLabel           = "world"
 	chunkSize               = 16 // 1チャンク = 16x16セル
-	chunkCount              = 16 // 16x16チャンク
-	worldSize               = chunkSize * chunkCount // 256x256セル
+	chunkCount              = 64 // 64x64チャンク
+	worldSize               = chunkSize * chunkCount // 1024x1024セル
 	opBlockUpdate     int64 = 4
 	opAOIUpdate       int64 = 5
 )
@@ -331,8 +331,9 @@ func dumpGroundTableCSV(logger runtime.Logger) {
 		logger.Warn("dumpGroundTableCSV MkdirAll: %v", err)
 		return
 	}
-	// チャンクごとにロックしてスナップショットを取る
-	var snapshot [worldSize][worldSize]uint16
+	// チャンクごとにロックしてスナップショットを取る（ヒープ確保）
+	snapshot := make([][]uint16, worldSize)
+	for i := range snapshot { snapshot[i] = make([]uint16, worldSize) }
 	for cx := 0; cx < chunkCount; cx++ {
 		for cz := 0; cz < chunkCount; cz++ {
 			ch := &chunks[cx][cz]
@@ -427,86 +428,66 @@ func rpcGetGroundChunk(_ context.Context, _ runtime.Logger, _ *sql.DB, _ runtime
 	return string(b), nil
 }
 
-// rpcGetGroundTable は全チャンクの地面テーブルをまとめて返す（後方互換）
+// rpcGetGroundTable は廃止（ワールドが1024x1024になり全チャンク一括返却は非現実的）
 func rpcGetGroundTable(_ context.Context, _ runtime.Logger, _ *sql.DB, _ runtime.NakamaModule, _ string) (string, error) {
-	fmt.Println("[getGroundTable]")
-	flat := make([]uint8, worldSize*worldSize*6)
-	for cx := 0; cx < chunkCount; cx++ {
-		for cz := 0; cz < chunkCount; cz++ {
-			ch := &chunks[cx][cz]
-			ch.mu.RLock()
-			for lx := 0; lx < chunkSize; lx++ {
-				for lz := 0; lz < chunkSize; lz++ {
-					gx := cx*chunkSize + lx
-					gz := cz*chunkSize + lz
-					i := (gx*worldSize + gz) * 6
-					c := ch.cells[lx][lz]
-					flat[i] = uint8(c.BlockID & 0xFF)
-					flat[i+1] = uint8(c.BlockID >> 8)
-					flat[i+2] = c.R
-					flat[i+3] = c.G
-					flat[i+4] = c.B
-					flat[i+5] = c.A
-				}
-			}
-			ch.mu.RUnlock()
-		}
-	}
-	b, err := json.Marshal(map[string]interface{}{"table": flatToInts(flat)})
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	fmt.Println("[getGroundTable] deprecated — use syncChunks")
+	return `{"error":"deprecated: use syncChunks with AOI range"}`, nil
 }
 
 // rpcSyncChunks はクライアントのハッシュと比較し、差分チャンクだけ返す
-// payload: {"hashes":["0","0",...]} (chunkCount*chunkCount個, 10進文字列, cx優先順)
+// payload: {"minCX":0,"minCZ":0,"maxCX":15,"maxCZ":15,"hashes":{"0_0":"12345",...}}
+// AOI範囲内のチャンクのみ比較し、差分を返す
 func rpcSyncChunks(_ context.Context, _ runtime.Logger, _ *sql.DB, _ runtime.NakamaModule, payload string) (string, error) {
 	var req struct {
-		Hashes []string `json:"hashes"`
+		MinCX  int               `json:"minCX"`
+		MinCZ  int               `json:"minCZ"`
+		MaxCX  int               `json:"maxCX"`
+		MaxCZ  int               `json:"maxCZ"`
+		Hashes map[string]string `json:"hashes"`
 	}
 	if err := json.Unmarshal([]byte(payload), &req); err != nil {
 		return "", err
 	}
-	total := chunkCount * chunkCount
-	// ハッシュ数が足りない場合は 0 埋め
-	for len(req.Hashes) < total {
-		req.Hashes = append(req.Hashes, "0")
-	}
+	// クランプ
+	if req.MinCX < 0 { req.MinCX = 0 }
+	if req.MinCZ < 0 { req.MinCZ = 0 }
+	if req.MaxCX >= chunkCount { req.MaxCX = chunkCount - 1 }
+	if req.MaxCZ >= chunkCount { req.MaxCZ = chunkCount - 1 }
+	if req.Hashes == nil { req.Hashes = make(map[string]string) }
 
 	type chunkResp struct {
-		CX    int   `json:"cx"`
-		CZ    int   `json:"cz"`
+		CX    int    `json:"cx"`
+		CZ    int    `json:"cz"`
 		Hash  string `json:"hash"`
 		Table []int  `json:"table"`
 	}
 	var diff []chunkResp
+	total := 0
 
-	for cx := 0; cx < chunkCount; cx++ {
-		for cz := 0; cz < chunkCount; cz++ {
-			idx := cx*chunkCount + cz
+	for cx := req.MinCX; cx <= req.MaxCX; cx++ {
+		for cz := req.MinCZ; cz <= req.MaxCZ; cz++ {
+			total++
+			key := fmt.Sprintf("%d_%d", cx, cz)
 			ch := &chunks[cx][cz]
 			ch.mu.RLock()
-			serverHash := ch.hash
+			serverHashStr := fmt.Sprintf("%d", ch.hash)
 			ch.mu.RUnlock()
-			clientHashStr := req.Hashes[idx]
-			serverHashStr := fmt.Sprintf("%d", serverHash)
-			if clientHashStr == serverHashStr {
+			if clientHash, ok := req.Hashes[key]; ok && clientHash == serverHashStr {
 				continue
 			}
 			ch.mu.RLock()
 			flat := ch.toFlat()
-			h := ch.hash
+			h := fmt.Sprintf("%d", ch.hash)
 			ch.mu.RUnlock()
 			diff = append(diff, chunkResp{
 				CX:    cx,
 				CZ:    cz,
-				Hash:  fmt.Sprintf("%d", h),
+				Hash:  h,
 				Table: flatToInts(flat),
 			})
 		}
 	}
-	fmt.Printf("[syncChunks] sent=%d/%d\n", len(diff), total)
+	fmt.Printf("[syncChunks] sent=%d/%d (range %d,%d-%d,%d)\n", len(diff), total, req.MinCX, req.MinCZ, req.MaxCX, req.MaxCZ)
 	b, err := json.Marshal(map[string]interface{}{"chunks": diff})
 	if err != nil {
 		return "", err

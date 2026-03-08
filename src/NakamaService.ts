@@ -239,10 +239,10 @@ export class NakamaService {
         } catch { return null; }
     }
 
-    async syncChunks(hashes: string[]): Promise<{ cx: number; cz: number; hash: string; table: number[] }[]> {
+    async syncChunks(minCX: number, minCZ: number, maxCX: number, maxCZ: number, hashes: Record<string, string>): Promise<{ cx: number; cz: number; hash: string; table: number[] }[]> {
         if (!this.session) return [];
         try {
-            const result = await this.client.rpc(this.session, "syncChunks", { hashes } as unknown as object);
+            const result = await this.client.rpc(this.session, "syncChunks", { minCX, minCZ, maxCX, maxCZ, hashes } as unknown as object);
             if (!result?.payload) return [];
             const raw = typeof result.payload === "string" ? result.payload : JSON.stringify(result.payload);
             const data = JSON.parse(raw) as { chunks?: { cx: number; cz: number; hash: string; table: number[] }[] };

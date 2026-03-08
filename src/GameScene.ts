@@ -70,33 +70,19 @@ export class GameScene {
     private remoteSpeeches = new Map<string, (text: string) => void>();
 
     // ===== 地面ブロック =====
-    // 16x16チャンク × 16x16セル = 256x256セル
+    // 64x64チャンク × 16x16セル = 1024x1024セル
     private static readonly CHUNK_SIZE = 16;
-    private static readonly CHUNK_COUNT = 16;
-    private static readonly WORLD_SIZE = 256; // CHUNK_SIZE * CHUNK_COUNT
-    // チャンク構造体: 6バイト/セル のデータ + FNV-1a 64bit ハッシュ
-    private chunks: { cells: Uint8Array; hash: bigint }[][] = (() => {
-        const CS = 16;
-        const CC = 16;
-        const arr: { cells: Uint8Array; hash: bigint }[][] = [];
-        for (let cx = 0; cx < CC; cx++) {
-            arr[cx] = [];
-            for (let cz = 0; cz < CC; cz++) {
-                arr[cx][cz] = { cells: new Uint8Array(CS * CS * 6), hash: 0n };
-            }
-        }
-        return arr;
-    })();
+    private static readonly CHUNK_COUNT = 64;
+    private static readonly WORLD_SIZE = 1024; // CHUNK_SIZE * CHUNK_COUNT
+    // チャンク構造体: 6バイト/セル のデータ + FNV-1a 64bit ハッシュ（スパース: 訪問済みのみ）
+    private chunks = new Map<string, { cells: Uint8Array; hash: bigint }>();
     // IndexedDB保存時のハッシュ（ログアウト時に差分検出用）
-    private dbHashes: string[][] = (() => {
-        const arr: string[][] = [];
-        for (let cx = 0; cx < 16; cx++) { arr[cx] = []; for (let cz = 0; cz < 16; cz++) arr[cx][cz] = "0"; }
-        return arr;
-    })();
+    private dbHashes = new Map<string, string>();
     private currentUserId: string | null = null;
     // AOI（Area of Interest）: 現在のチャンク範囲
     private aoiRadius = 48; // AOI半径（セル単位）。FarClipとは独立
-    private lastAOI = { minCX: 0, minCZ: 0, maxCX: 15, maxCZ: 15 };
+    private lastAOI = { minCX: -1, minCZ: -1, maxCX: -1, maxCZ: -1 }; // 初回送信を強制するセンチネル
+    private syncThrottleTimer: ReturnType<typeof setTimeout> | null = null;
     private blockMeshes = new Map<number, Mesh>();
     private blockMatCache = new Map<string, StandardMaterial>();
     private buildMode = false;
@@ -206,7 +192,45 @@ export class GameScene {
             maxCX !== this.lastAOI.maxCX || maxCZ !== this.lastAOI.maxCZ) {
             this.lastAOI = { minCX, minCZ, maxCX, maxCZ };
             this.nakama.sendAOI(minCX, minCZ, maxCX, maxCZ).catch(() => {});
+            // AOI変化時にチャンクデータも同期（スロットル付き）
+            if (this.syncThrottleTimer) clearTimeout(this.syncThrottleTimer);
+            this.syncThrottleTimer = setTimeout(() => { this.syncAOIChunks().catch(() => {}); }, 300);
         }
+    }
+
+    // AOI範囲内のチャンクをサーバと差分同期
+    private async syncAOIChunks(): Promise<void> {
+        const CS = GameScene.CHUNK_SIZE;
+        const aoi = this.lastAOI;
+        if (aoi.minCX < 0) return; // センチネル
+        const hashes: Record<string, string> = {};
+        for (let cx = aoi.minCX; cx <= aoi.maxCX; cx++) {
+            for (let cz = aoi.minCZ; cz <= aoi.maxCZ; cz++) {
+                const key = `${cx}_${cz}`;
+                const ch = this.chunks.get(key);
+                hashes[key] = ch ? ch.hash.toString() : "0";
+            }
+        }
+        const diffs = await this.nakama.syncChunks(aoi.minCX, aoi.minCZ, aoi.maxCX, aoi.maxCZ, hashes);
+        for (const d of diffs) {
+            if (d.table.length !== CS * CS * 6) continue;
+            const key = `${d.cx}_${d.cz}`;
+            let ch = this.chunks.get(key);
+            if (!ch) { ch = { cells: new Uint8Array(CS * CS * 6), hash: 0n }; this.chunks.set(key, ch); }
+            const baseGX = d.cx * CS, baseGZ = d.cz * CS;
+            for (let lx = 0; lx < CS; lx++) {
+                for (let lz = 0; lz < CS; lz++) {
+                    const si = (lx * CS + lz) * 6;
+                    for (let k = 0; k < 6; k++) ch.cells[si + k] = d.table[si + k];
+                    const blockId = d.table[si] | (d.table[si + 1] << 8);
+                    const gx = baseGX + lx, gz = baseGZ + lz;
+                    if (blockId !== 0) this.placeBlock(gx, gz, blockId, d.table[si + 2], d.table[si + 3], d.table[si + 4], d.table[si + 5]);
+                    else this.placeBlock(gx, gz, 0, 0, 0, 0, 0);
+                }
+            }
+            ch.hash = BigInt(d.hash || "0");
+        }
+        if (diffs.length > 0) console.log(`[syncChunks] updated ${diffs.length} chunks (AOI ${aoi.minCX},${aoi.minCZ}-${aoi.maxCX},${aoi.maxCZ})`);
     }
 
     // IndexedDBからチャンクをメモリに復元（ログイン後）
@@ -222,9 +246,9 @@ export class GameScene {
                 const cz = parseInt(parts[1], 10);
                 if (cx < 0 || cx >= CC || cz < 0 || cz >= CC) continue;
                 if (rec.cells.length !== CS * CS * 6) continue;
-                this.chunks[cx][cz].cells.set(rec.cells);
-                this.chunks[cx][cz].hash = BigInt(rec.hash || "0");
-                this.dbHashes[cx][cz] = rec.hash || "0";
+                const key = `${cx}_${cz}`;
+                this.chunks.set(key, { cells: new Uint8Array(rec.cells), hash: BigInt(rec.hash || "0") });
+                this.dbHashes.set(key, rec.hash || "0");
             }
             console.log(`[ChunkDB] loaded ${records.length} chunks from IndexedDB (user=${userId})`);
         } catch (e) {
@@ -236,16 +260,12 @@ export class GameScene {
     private saveChunksToDB(): void {
         const userId = this.currentUserId;
         if (!userId) return;
-        const CC = GameScene.CHUNK_COUNT;
         const dirty: ChunkRecord[] = [];
-        for (let cx = 0; cx < CC; cx++) {
-            for (let cz = 0; cz < CC; cz++) {
-                const ch = this.chunks[cx][cz];
-                const hashStr = ch.hash.toString();
-                if (hashStr !== this.dbHashes[cx][cz]) {
-                    dirty.push({ key: `${cx}_${cz}`, cells: new Uint8Array(ch.cells), hash: hashStr });
-                    this.dbHashes[cx][cz] = hashStr;
-                }
+        for (const [key, ch] of this.chunks) {
+            const hashStr = ch.hash.toString();
+            if (hashStr !== (this.dbHashes.get(key) ?? "0")) {
+                dirty.push({ key, cells: new Uint8Array(ch.cells), hash: hashStr });
+                this.dbHashes.set(key, hashStr);
             }
         }
         if (dirty.length > 0) {
@@ -974,7 +994,9 @@ export class GameScene {
                     const cx = Math.floor(gx / CS), cz = Math.floor(gz / CS);
                     const lx = gx % CS, lz = gz % CS;
                     const si = (lx * CS + lz) * 6;
-                    const ch = this.chunks[cx][cz];
+                    const key = `${cx}_${cz}`;
+                    let ch = this.chunks.get(key);
+                    if (!ch) { ch = { cells: new Uint8Array(CS * CS * 6), hash: 0n }; this.chunks.set(key, ch); }
                     ch.cells[si]   = blockId & 0xFF;
                     ch.cells[si+1] = (blockId >> 8) & 0xFF;
                     ch.cells[si+2] = r; ch.cells[si+3] = g;
@@ -983,48 +1005,23 @@ export class GameScene {
                     this.placeBlock(gx, gz, blockId, r, g, b, a);
                 };
 
-                // ハッシュ差分で必要なチャンクだけサーバから取得
+                // IndexedDB にあるチャンクのブロックをまず描画
                 {
                     const CS = GameScene.CHUNK_SIZE;
-                    const CC = GameScene.CHUNK_COUNT;
-                    // IndexedDB にあるチャンクのブロックをまず描画
-                    for (let cx = 0; cx < CC; cx++) {
-                        for (let cz = 0; cz < CC; cz++) {
-                            const ch = this.chunks[cx][cz];
-                            const baseGX = cx * CS, baseGZ = cz * CS;
-                            for (let lx = 0; lx < CS; lx++) {
-                                for (let lz = 0; lz < CS; lz++) {
-                                    const si = (lx * CS + lz) * 6;
-                                    const blockId = ch.cells[si] | (ch.cells[si + 1] << 8);
-                                    if (blockId !== 0) this.placeBlock(baseGX + lx, baseGZ + lz, blockId, ch.cells[si + 2], ch.cells[si + 3], ch.cells[si + 4], ch.cells[si + 5]);
-                                }
+                    for (const [key, ch] of this.chunks) {
+                        const parts = key.split("_");
+                        const cx = parseInt(parts[0], 10), cz = parseInt(parts[1], 10);
+                        const baseGX = cx * CS, baseGZ = cz * CS;
+                        for (let lx = 0; lx < CS; lx++) {
+                            for (let lz = 0; lz < CS; lz++) {
+                                const si = (lx * CS + lz) * 6;
+                                const blockId = ch.cells[si] | (ch.cells[si + 1] << 8);
+                                if (blockId !== 0) this.placeBlock(baseGX + lx, baseGZ + lz, blockId, ch.cells[si + 2], ch.cells[si + 3], ch.cells[si + 4], ch.cells[si + 5]);
                             }
                         }
                     }
-                    // サーバと差分同期
-                    const hashes: string[] = [];
-                    for (let cx = 0; cx < CC; cx++)
-                        for (let cz = 0; cz < CC; cz++)
-                            hashes.push(this.chunks[cx][cz].hash.toString());
-                    this.nakama.syncChunks(hashes).then(diffs => {
-                        for (const d of diffs) {
-                            if (d.table.length !== CS * CS * 6) continue;
-                            const ch = this.chunks[d.cx][d.cz];
-                            const baseGX = d.cx * CS, baseGZ = d.cz * CS;
-                            for (let lx = 0; lx < CS; lx++) {
-                                for (let lz = 0; lz < CS; lz++) {
-                                    const si = (lx * CS + lz) * 6;
-                                    for (let k = 0; k < 6; k++) ch.cells[si + k] = d.table[si + k];
-                                    const blockId = d.table[si] | (d.table[si + 1] << 8);
-                                    const gx = baseGX + lx, gz = baseGZ + lz;
-                                    if (blockId !== 0) this.placeBlock(gx, gz, blockId, d.table[si + 2], d.table[si + 3], d.table[si + 4], d.table[si + 5]);
-                                    else this.placeBlock(gx, gz, 0, 0, 0, 0, 0);
-                                }
-                            }
-                            ch.hash = BigInt(d.hash || "0");
-                        }
-                        console.log(`[syncChunks] updated ${diffs.length}/${CC * CC} chunks`);
-                    }).catch(() => {});
+                    // AOI範囲のチャンクをサーバと差分同期
+                    this.syncAOIChunks().catch(() => {});
                 }
 
                 // 自分の初期位置を全員へ送信 + AOI送信
@@ -1899,7 +1896,8 @@ export class GameScene {
                         const ccx = Math.floor(gx / CS), ccz = Math.floor(gz / CS);
                         const clx = gx % CS, clz = gz % CS;
                         const csi = (clx * CS + clz) * 6;
-                        const curId = this.chunks[ccx][ccz].cells[csi] | (this.chunks[ccx][ccz].cells[csi+1] << 8);
+                        const cch = this.chunks.get(`${ccx}_${ccz}`);
+                        const curId = cch ? (cch.cells[csi] | (cch.cells[csi+1] << 8)) : 0;
                         const blockId = curId === 0 ? 1 : 0;
                         const colorInput = document.getElementById("blockColorInput") as HTMLInputElement | null;
                         const hex = colorInput?.value ?? "#3366ff";
