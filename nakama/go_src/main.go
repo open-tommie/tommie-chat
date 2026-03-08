@@ -24,6 +24,7 @@ const (
 	chunkCount              = 16 // 16x16チャンク
 	worldSize               = chunkSize * chunkCount // 256x256セル
 	opBlockUpdate     int64 = 4
+	opAOIUpdate       int64 = 5
 )
 
 // 地面セル: blockID (uint16) + RGBA 各1バイト
@@ -193,11 +194,30 @@ func rpcGetWorldMatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	return string(b), nil
 }
 
+// playerAOI はプレイヤーのArea of Interest（チャンク範囲）
+type playerAOI struct {
+	MinCX, MinCZ, MaxCX, MaxCZ int
+}
+
+// containsChunk はチャンク(cx,cz)がAOI内かどうか
+func (a *playerAOI) containsChunk(cx, cz int) bool {
+	return cx >= a.MinCX && cx <= a.MaxCX && cz >= a.MinCZ && cz <= a.MaxCZ
+}
+
+// matchState はマッチの状態（プレイヤーごとのAOI管理）
+type matchState struct {
+	AOIs      map[string]*playerAOI      // sessionID -> AOI
+	Presences map[string]runtime.Presence // sessionID -> Presence
+}
+
 // worldMatch は Nakama マッチハンドラの実装
 type worldMatch struct{}
 
 func (m *worldMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, params map[string]interface{}) (interface{}, int, string) {
-	return map[string]interface{}{}, 10, "world"
+	return &matchState{
+		AOIs:      make(map[string]*playerAOI),
+		Presences: make(map[string]runtime.Presence),
+	}, 10, "world"
 }
 
 func (m *worldMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, presence runtime.Presence, metadata map[string]string) (interface{}, bool, string) {
@@ -205,20 +225,52 @@ func (m *worldMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger
 }
 
 func (m *worldMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, presences []runtime.Presence) interface{} {
-	return state
+	ms := state.(*matchState)
+	for _, p := range presences {
+		sid := p.GetSessionId()
+		ms.AOIs[sid] = &playerAOI{0, 0, chunkCount - 1, chunkCount - 1}
+		ms.Presences[sid] = p
+	}
+	return ms
 }
 
 func (m *worldMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, presences []runtime.Presence) interface{} {
-	return state
+	ms := state.(*matchState)
+	for _, p := range presences {
+		sid := p.GetSessionId()
+		delete(ms.AOIs, sid)
+		delete(ms.Presences, sid)
+	}
+	return ms
 }
 
 func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, messages []runtime.MatchData) interface{} {
+	ms := state.(*matchState)
 	for _, msg := range messages {
+		if msg.GetOpCode() == opAOIUpdate {
+			// AOI更新: {"minCX":0,"minCZ":0,"maxCX":15,"maxCZ":15}
+			var aoi struct {
+				MinCX int `json:"minCX"`
+				MinCZ int `json:"minCZ"`
+				MaxCX int `json:"maxCX"`
+				MaxCZ int `json:"maxCZ"`
+			}
+			if err := json.Unmarshal(msg.GetData(), &aoi); err == nil {
+				// クランプ
+				if aoi.MinCX < 0 { aoi.MinCX = 0 }
+				if aoi.MinCZ < 0 { aoi.MinCZ = 0 }
+				if aoi.MaxCX >= chunkCount { aoi.MaxCX = chunkCount - 1 }
+				if aoi.MaxCZ >= chunkCount { aoi.MaxCZ = chunkCount - 1 }
+				ms.AOIs[msg.GetSessionId()] = &playerAOI{aoi.MinCX, aoi.MinCZ, aoi.MaxCX, aoi.MaxCZ}
+			}
+			continue
+		}
+		// その他のメッセージ（移動・アバター等）は全員にブロードキャスト
 		if err := dispatcher.BroadcastMessage(msg.GetOpCode(), msg.GetData(), nil, msg, true); err != nil {
 			logger.Warn("BroadcastMessage error: %v", err)
 		}
 	}
-	return state
+	return ms
 }
 
 func (m *worldMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, graceSeconds int) interface{} {
@@ -226,11 +278,34 @@ func (m *worldMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, 
 }
 
 func (m *worldMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, data string) (interface{}, string) {
-	// ブロック更新シグナルを全プレイヤーへブロードキャスト
-	if err := dispatcher.BroadcastMessage(opBlockUpdate, []byte(data), nil, nil, false); err != nil {
-		logger.Warn("MatchSignal BroadcastMessage error: %v", err)
+	ms := state.(*matchState)
+	var blk struct {
+		GX int `json:"gx"`
+		GZ int `json:"gz"`
 	}
-	return state, data
+	if err := json.Unmarshal([]byte(data), &blk); err != nil {
+		// パース失敗時は全員に送信
+		dispatcher.BroadcastMessage(opBlockUpdate, []byte(data), nil, nil, false)
+		return ms, data
+	}
+	cx := blk.GX / chunkSize
+	cz := blk.GZ / chunkSize
+	// AOI内のプレイヤーだけに送信
+	var targets []runtime.Presence
+	for sid, aoi := range ms.AOIs {
+		if aoi.containsChunk(cx, cz) {
+			if p, ok := ms.Presences[sid]; ok {
+				targets = append(targets, p)
+			}
+		}
+	}
+	fmt.Printf("[setBlock:signal] chunk=(%d,%d) targets=%d/%d\n", cx, cz, len(targets), len(ms.AOIs))
+	if len(targets) > 0 {
+		if err := dispatcher.BroadcastMessage(opBlockUpdate, []byte(data), targets, nil, false); err != nil {
+			logger.Warn("MatchSignal BroadcastMessage error: %v", err)
+		}
+	}
+	return ms, data
 }
 
 // rpcPing はクライアントのラウンドトリップ時間計測用 RPC

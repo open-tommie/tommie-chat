@@ -6,6 +6,7 @@ const OP_INIT_POS      = 1; // ログイン時の初期位置
 const OP_MOVE_TARGET   = 2; // クリック移動の目標位置
 const OP_AVATAR_CHANGE = 3; // アバターテクスチャ変更
 const OP_BLOCK_UPDATE  = 4; // ブロック設置/削除通知
+const OP_AOI_UPDATE    = 5; // AOI（チャンク範囲）更新
 
 export class NakamaService {
     private client: Client;
@@ -123,6 +124,13 @@ export class NakamaService {
         if (!this.socket || !this.matchId) return;
         try {
             await this.socket.sendMatchState(this.matchId, OP_MOVE_TARGET, JSON.stringify({ x, z }));
+        } catch { /* ignore */ }
+    }
+
+    async sendAOI(minCX: number, minCZ: number, maxCX: number, maxCZ: number): Promise<void> {
+        if (!this.socket || !this.matchId) return;
+        try {
+            await this.socket.sendMatchState(this.matchId, OP_AOI_UPDATE, JSON.stringify({ minCX, minCZ, maxCX, maxCZ }));
         } catch { /* ignore */ }
     }
 

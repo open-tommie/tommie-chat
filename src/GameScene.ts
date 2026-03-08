@@ -94,6 +94,8 @@ export class GameScene {
         return arr;
     })();
     private currentUserId: string | null = null;
+    // AOI（Area of Interest）: 現在のチャンク範囲
+    private lastAOI = { minCX: 0, minCZ: 0, maxCX: 15, maxCZ: 15 };
     private blockMeshes = new Map<number, Mesh>();
     private blockMatCache = new Map<string, StandardMaterial>();
     private buildMode = false;
@@ -155,7 +157,7 @@ export class GameScene {
         this.camera.keysRight = [];
 
         this.camera.lowerRadiusLimit = 2;
-        this.camera.upperRadiusLimit = 50;
+        this.camera.upperRadiusLimit = 200;
         this.camera.fovMode = ArcRotateCamera.FOVMODE_VERTICAL_FIXED;
         this.camera.inertia = 0;
         this.camera.useNaturalPinchZoom = true;
@@ -185,6 +187,25 @@ export class GameScene {
         this.scene.fogStart = 30.0; 
         this.scene.fogEnd = this.camera.maxZ; 
 
+    }
+
+    // AOI計算: プレイヤー位置とカメラfarClipからチャンク範囲を算出し、変化時にサーバへ送信
+    private updateAOI(): void {
+        const half = GameScene.WORLD_SIZE / 2;
+        const CS = GameScene.CHUNK_SIZE;
+        const CC = GameScene.CHUNK_COUNT;
+        const px = this.playerBox.position.x + half;
+        const pz = this.playerBox.position.z + half;
+        const r = this.camera.maxZ;
+        const minCX = Math.max(0, Math.floor((px - r) / CS));
+        const minCZ = Math.max(0, Math.floor((pz - r) / CS));
+        const maxCX = Math.min(CC - 1, Math.floor((px + r) / CS));
+        const maxCZ = Math.min(CC - 1, Math.floor((pz + r) / CS));
+        if (minCX !== this.lastAOI.minCX || minCZ !== this.lastAOI.minCZ ||
+            maxCX !== this.lastAOI.maxCX || maxCZ !== this.lastAOI.maxCZ) {
+            this.lastAOI = { minCX, minCZ, maxCX, maxCZ };
+            this.nakama.sendAOI(minCX, minCZ, maxCX, maxCZ).catch(() => {});
+        }
     }
 
     // IndexedDBからチャンクをメモリに復元（ログイン後）
@@ -1005,8 +1026,9 @@ export class GameScene {
                     }).catch(() => {});
                 }
 
-                // 自分の初期位置を全員へ送信
+                // 自分の初期位置を全員へ送信 + AOI送信
                 { const p = this.playerBox; this.nakama.sendInitPos(p.position.x, p.position.z, p.rotation.y).catch(() => {}); }
+                this.updateAOI();
                 const srvInfo = await this.nakama.getServerInfo();
                 addServerLog(host, port, "ログイン成功", srvInfo);
                 loggedInHost = host;
@@ -1926,6 +1948,7 @@ export class GameScene {
                     this.clickMarker.position.z = snappedZ;
                     this.clickMarker.isVisible = true;
                     this.nakama.sendMoveTarget(snappedX, snappedZ).catch(() => {});
+                    this.updateAOI();
                 }
             }
         });
@@ -1970,6 +1993,7 @@ export class GameScene {
                     this.lastKeyboardSendTime = now;
                     const p = this.playerBox.position;
                     this.nakama.sendMoveTarget(p.x, p.z).catch(() => {});
+                    this.updateAOI();
                 }
             }
 
@@ -2684,6 +2708,8 @@ export class GameScene {
         }
 
         const playerPosVal = document.getElementById("val-player-pos");
+        const chunkVal = document.getElementById("val-chunk");
+        const aoiVal = document.getElementById("val-aoi");
         const camInfoVal = document.getElementById("val-cam-info");
 
         const fv = document.getElementById("val-fps");
@@ -2768,6 +2794,17 @@ export class GameScene {
                 if (!isNaN(val) && val > 0) {
                     this.camera.maxZ = val;
                     this.scene.fogEnd = val;
+                    this.updateAOI();
+                }
+            });
+        }
+
+        const maxZoomSelect = document.getElementById("maxZoomSelect") as HTMLSelectElement;
+        if (maxZoomSelect && this.camera) {
+            maxZoomSelect.addEventListener("change", (e) => {
+                const val = parseFloat((e.target as HTMLSelectElement).value);
+                if (!isNaN(val) && val > 0) {
+                    this.camera.upperRadiusLimit = val;
                 }
             });
         }
@@ -2978,6 +3015,22 @@ export class GameScene {
             });
         }
 
+        const teleportBtn = document.getElementById("teleportBtn") as HTMLButtonElement;
+        const teleportX = document.getElementById("teleportX") as HTMLInputElement;
+        const teleportZ = document.getElementById("teleportZ") as HTMLInputElement;
+        if (teleportBtn && teleportX && teleportZ && this.playerBox) {
+            teleportBtn.addEventListener("click", () => {
+                const x = parseFloat(teleportX.value);
+                const z = parseFloat(teleportZ.value);
+                if (isNaN(x) || isNaN(z)) return;
+                this.playerBox.position.x = x;
+                this.playerBox.position.z = z;
+                this.targetPosition = null;
+                this.nakama.sendMoveTarget(x, z).catch(() => {});
+                this.updateAOI();
+            });
+        }
+
         const avatarSelect = document.getElementById("avatarSelect") as HTMLSelectElement | null;
         if (avatarSelect) {
             avatarSelect.value = this.playerTextureUrl;
@@ -3089,6 +3142,17 @@ export class GameScene {
             if (playerPosVal && this.playerBox) {
                 const pos = this.playerBox.position;
                 playerPosVal.innerText = `${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}`;
+                if (chunkVal) {
+                    const half = GameScene.WORLD_SIZE / 2;
+                    const cx = Math.floor((pos.x + half) / GameScene.CHUNK_SIZE);
+                    const cz = Math.floor((pos.z + half) / GameScene.CHUNK_SIZE);
+                    chunkVal.innerText = `(${cx}, ${cz})`;
+                }
+            }
+
+            if (aoiVal) {
+                const a = this.lastAOI;
+                aoiVal.innerText = `(${a.minCX},${a.minCZ})-(${a.maxCX},${a.maxCZ})`;
             }
 
             if (camInfoVal && this.camera) {

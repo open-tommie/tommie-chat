@@ -1255,6 +1255,9 @@
             <tr><td class="label" title="19.FarClip&#10;カメラの最遠クリップ距離（これより遠いオブジェクトを描画しない）&#10;初期値: 200&#10;典型的なMMO: 100〜1000（フォグ終点に合わせると自然）&#10;Minecraft: 描画距離 初期値12チャンク（192m）, 範囲2〜32チャンク（32〜512m）">19.FarClip:</td><td class="value">
                 <select id="farClipInput" class="debug-select">
                     <option value="10">10</option>
+                    <option value="30">30</option>
+                    <option value="50">50</option>
+                    <option value="70">70</option>
                     <option value="100">100</option>
                     <option value="200" selected>200</option>
                     <option value="500">500</option>
@@ -1300,13 +1303,31 @@
                 <button id="topViewBtn" class="debug-btn">Top View</button>
             </td></tr>
             <tr><td class="label" title="28.Player Pos&#10;プレイヤーのワールド座標（X, Y, Z）&#10;初期値: 0.0, 0.0, 0.0（原点）&#10;典型的なMMO: ゾーン座標として使用&#10;Minecraft: F3デバッグ画面でXYZ座標表示（Y=64が海面レベル）">28.Player Pos:</td><td class="value" id="val-player-pos">0.0, 0.0, 0.0</td></tr>
+            <tr><td class="label" title="28b.Chunk&#10;プレイヤーが現在いるチャンク座標（CX, CZ）&#10;ワールド座標からチャンク座標に変換&#10;0〜15の範囲">28b.Chunk:</td><td class="value" id="val-chunk">-</td></tr>
+            <tr><td class="label" title="28c.AOI&#10;Area of Interest（チャンク範囲）&#10;minCX,minCZ〜maxCX,maxCZ&#10;FarClipに応じて自動計算されるチャンク送受信範囲">28c.AOI:</td><td class="value" id="val-aoi" style="font-size: 11px;">-</td></tr>
             <tr><td class="label" title="29.Cam Info&#10;カメラのα（水平回転角）, β（垂直仰角）, r（プレイヤーからの距離）&#10;初期値: α=90°, β=67°, r=10&#10;典型的なMMO: β=45〜80°, r=5〜20&#10;Minecraft: F3でFacing方向（N/S/E/W）と回転角（Yaw/Pitch）表示">29.Cam Info:</td><td class="value" id="val-cam-info" style="font-size: 11px;">0°, 0°, 0.0</td></tr>
+            <tr><td class="label" title="29b.MaxZoom&#10;マウスホイールでズームアウトできる最大距離（upperRadiusLimit）&#10;初期値: 200&#10;大きいほど遠くまで引ける">29b.MaxZoom:</td><td class="value">
+                <select id="maxZoomSelect" class="debug-select">
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="200" selected>200</option>
+                    <option value="500">500</option>
+                    <option value="1000">1000</option>
+                </select>
+            </td></tr>
             <tr><td class="label" title="30.API&#10;使用中のグラフィックスAPI&#10;初期値: WebGL2&#10;典型的なMMO: WebGL2（WebGPUは次世代・高性能）&#10;Minecraft: Java版 OpenGL 3.2+, Bedrock版 DirectX11/Metal/Vulkan（プラットフォーム依存）">30.API:</td><td class="value" id="val-api">WebGL2</td></tr>
             <tr><td class="label" title="31.Glossiness&#10;マテリアルの鏡面反射強度（specularColor）&#10;初期値: 0.5&#10;典型的なMMO: 0.0（つや消し）〜1.0（金属・水面）&#10;Minecraft: バニラなし, PBRシェーダー（SEUS PTGI等）でSpecular/Roughness設定可">31.Glossiness:</td><td class="value">
                 <input type="number" id="glossInput" class="debug-input" value="0.5" step="0.1" min="0" max="1">
             </td></tr>
             <tr><td class="label" title="33.Def.Pos&#10;プレイヤーをデフォルト位置（原点 0,0,0）にテレポート&#10;初期値: X=0, Y=0, Z=0&#10;典型的なMMO: リスポーン・スタート地点に相当&#10;Minecraft: /tp @s 0 64 0 コマンド or スポーン地点設定でリスポーン">33.Def.Pos:</td><td class="value">
                 <button id="defaultPosBtn" class="debug-btn">Reset</button>
+            </td></tr>
+            <tr><td class="label" title="33b.Teleport&#10;X, Zを入力してGoボタンで指定座標にテレポート&#10;ワールド座標（-128〜127）">33b.Teleport:</td><td class="value">
+                <div style="display:flex; justify-content:flex-end; gap:2px; width:100%;">
+                    <input type="number" id="teleportX" class="debug-input" placeholder="X" style="width:42px;">
+                    <input type="number" id="teleportZ" class="debug-input" placeholder="Z" style="width:42px;">
+                    <button id="teleportBtn" class="debug-btn" style="width:30px;">Go</button>
+                </div>
             </td></tr>
             <tr><td class="label" title="32.Controls&#10;操作方法&#10;[移動] W/↑:前進  S/↓:後退  A/←:左  D/→:右&#10;[カメラ] マウス左ドラッグ:回転  ホイール:ズーム&#10;[移動先] 地面を左クリック:クリック位置へ移動&#10;[チャット] テキスト入力後 Enter または 送信ボタン&#10;[クリア] クリアボタン:吹き出しテキスト消去&#10;Minecraft: WASD:移動, Space:ジャンプ, Shift:スニーク, F5:視点切替, F3:デバッグ, T:チャット">32.Controls:</td><td class="value"></td></tr>
             <tr><td class="label" title="34.自動デバッグチャット&#10;数秒毎にランダムなセリフを自動投稿します&#10;初期値: Off&#10;ログイン中のみ有効">34.AutoChat:</td><td class="value">
