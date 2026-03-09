@@ -539,9 +539,9 @@ export function setupHtmlUI(game: GameScene): void {
     const fetchAndSetLoginTime = async (sessionId: string, userId: string, _username: string) => {
         const isoStr = await game.nakama.getSessionLoginTime(userId, sessionId);
         const loginDate = isoStr ? new Date(isoStr) : new Date();
-        const existing = userMap.get(sessionId);
+        const existing = userMap.get(userId);
         if (existing) {
-            userMap.set(sessionId, { ...existing, loginTime: formatTimestamp(loginDate), loginTimestamp: loginDate.getTime() });
+            userMap.set(userId, { ...existing, loginTime: formatTimestamp(loginDate), loginTimestamp: loginDate.getTime() });
             renderUserList();
         }
     };
@@ -624,13 +624,13 @@ export function setupHtmlUI(game: GameScene): void {
     };
 
     game.nakama.onPresenceJoin = (sessionId, userId, username) => {
-        userMap.set(sessionId, { username, uuid: userId, sessionId, loginTimestamp: Date.now(), loginTime: "…" });
+        userMap.set(userId, { username, uuid: userId, sessionId, loginTimestamp: Date.now(), loginTime: "…" });
         renderUserList();
         fetchAndSetLoginTime(sessionId, userId, username);
         addRemoteAvatar(sessionId, username);
     };
     game.nakama.onPresenceNewJoin = (sessionId, userId, username) => {
-        userMap.set(sessionId, { username, uuid: userId, sessionId, loginTimestamp: Date.now(), loginTime: "…" });
+        userMap.set(userId, { username, uuid: userId, sessionId, loginTimestamp: Date.now(), loginTime: "…" });
         renderUserList();
         fetchAndSetLoginTime(sessionId, userId, username);
         addChatHistory("[system]", `${username}がログインしました。`);
@@ -639,9 +639,13 @@ export function setupHtmlUI(game: GameScene): void {
         game.nakama.sendAvatarChange(game.playerTextureUrl).catch(() => {});
     };
     game.nakama.onPresenceLeave = (sessionId, _userId, uname) => {
-        userMap.delete(sessionId);
+        // 現在のセッションIDが一致する場合のみ削除（リコネクト後の旧セッション離脱を無視）
+        const entry = userMap.get(_userId);
+        if (entry && entry.sessionId === sessionId) {
+            userMap.delete(_userId);
+            addChatHistory("[system]", `${uname}がログアウトしました。`);
+        }
         renderUserList();
-        addChatHistory("[system]", `${uname}がログアウトしました。`);
         removeRemoteAvatar(sessionId);
     };
 
@@ -781,6 +785,20 @@ export function setupHtmlUI(game: GameScene): void {
                 loginBtn.onclick = doLogout;
             }
             if (loginNameInput) loginNameInput.onkeydown = null;
+            // WebSocket切断時の自動再接続コールバック
+            game.nakama.onMatchDisconnect = () => {
+                console.warn("[UIPanel] match disconnected, auto-reconnect in progress");
+                addServerLog(loggedInHost, loggedInPort, "マッチ切断", "WebSocket切断 — 自動再接続中…");
+            };
+            game.nakama.onMatchReconnect = () => {
+                console.log("[UIPanel] match reconnected");
+                addServerLog(loggedInHost, loggedInPort, "マッチ再接続", "WebSocket復帰");
+                // 再接続後にInitPos・AOI・アバターを再送信
+                const p = game.playerBox;
+                game.nakama.sendInitPos(p.position.x, p.position.z, p.rotation.y).catch(() => {});
+                game.nakama.sendAvatarChange(game.playerTextureUrl).catch(() => {});
+                game.aoiManager.updateAOI();
+            };
             startPing();
             const ccuPanel = document.getElementById("ccu-panel");
             if (ccuPanel && ccuPanel.style.display !== "none") startCcu();
@@ -859,6 +877,9 @@ export function setupHtmlUI(game: GameScene): void {
 
         ctx.lineWidth = 1;
         const subStep = 10;
+        // 横グリッド描画 — Y軸ラベルを右揃え
+        ctx.font = FONT_STR;
+        const pingMajorLabels: { text: string; yp: number }[] = [];
         for (let ms = subStep; ms < maxPing; ms += subStep) {
             const yp = toY(ms);
             if (yp < 0) break;
@@ -866,10 +887,14 @@ export function setupHtmlUI(game: GameScene): void {
             ctx.strokeStyle = isMajor ? gridMajor : gridSub;
             ctx.setLineDash(isMajor ? [4, 3] : [2, 5]);
             ctx.beginPath(); ctx.moveTo(0, yp); ctx.lineTo(w, yp); ctx.stroke();
-            if (isMajor) {
-                ctx.fillStyle = labelCol;
-                ctx.font = FONT_STR;
-                ctx.fillText(`${ms}ms`, 2, yp - 2);
+            if (isMajor) pingMajorLabels.push({ text: `${ms}ms`, yp });
+        }
+        if (pingMajorLabels.length > 0) {
+            ctx.fillStyle = labelCol;
+            const maxLabelW = Math.max(...pingMajorLabels.map(l => ctx.measureText(l.text).width));
+            for (const { text, yp } of pingMajorLabels) {
+                const tw = ctx.measureText(text).width;
+                ctx.fillText(text, 2 + maxLabelW - tw, yp - 2);
             }
         }
         ctx.setLineDash([]);
@@ -963,8 +988,6 @@ export function setupHtmlUI(game: GameScene): void {
             const boxH = lineH * 3 + pad * 2;
             const boxX = w - boxW - 4;
             const boxY = 3;
-            ctx.fillStyle = avgBg;
-            ctx.fillRect(boxX, boxY, boxW, boxH);
             ctx.fillStyle = dark ? "#eee" : "#000";
             for (let li = 0; li < 3; li++) {
                 const y = boxY + pad + FONT_SIZE + li * lineH;
@@ -979,6 +1002,22 @@ export function setupHtmlUI(game: GameScene): void {
     let pingDisconnected = false;
     const PING_FAIL_THRESHOLD = 3;
 
+    // サーバ切断バナー
+    let disconnectBanner: HTMLDivElement | null = null;
+    const showDisconnectBanner = () => {
+        if (disconnectBanner) return;
+        disconnectBanner = document.createElement("div");
+        disconnectBanner.id = "disconnect-banner";
+        disconnectBanner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:10000;background:rgba(200,40,40,0.92);color:#fff;text-align:center;padding:10px 16px;font-size:15px;font-family:sans-serif;pointer-events:none;animation:fadeIn 0.3s ease;";
+        disconnectBanner.textContent = "サーバに接続できません — 再接続を試みています…";
+        document.body.appendChild(disconnectBanner);
+    };
+    const hideDisconnectBanner = () => {
+        if (!disconnectBanner) return;
+        disconnectBanner.remove();
+        disconnectBanner = null;
+    };
+
     const startPing = () => {
         if (pingTimer !== null) return;
         pingFailCount = 0;
@@ -990,6 +1029,7 @@ export function setupHtmlUI(game: GameScene): void {
                 if (pingDisconnected) {
                     pingDisconnected = false;
                     addServerLog(loggedInHost, loggedInPort, "回線復帰");
+                    hideDisconnectBanner();
                     if (loginStatus) {
                         loginStatus.style.color = "#00dd55";
                         loginStatus.textContent = isMobile ? "✓" : "✓回線復帰";
@@ -1010,6 +1050,7 @@ export function setupHtmlUI(game: GameScene): void {
                     pingDisconnected = true;
                     game.latestPingAvg = -1;
                     addServerLog(loggedInHost, loggedInPort, "回線切断", "ネットワーク障害またはサーバ停止により切断されました");
+                    showDisconnectBanner();
                     if (loginStatus) {
                         loginStatus.style.color = "#ff4444";
                         loginStatus.textContent = isMobile ? "✗" : "✗回線切断";
@@ -1114,7 +1155,7 @@ export function setupHtmlUI(game: GameScene): void {
     // ===== 同接数 (CCU) 計測 & グラフ =====
     // レンジ設定: { サンプル数, ポーリング間隔ms, 1サンプルあたりの秒数 }
     const CCU_RANGES: Record<string, { max: number; interval: number; secPerSample: number }> = {
-        "1m":  { max: 60,    interval: 5000,  secPerSample: 1 },
+        "1m":  { max: 60,    interval: 1000,  secPerSample: 1 },
         "5m":  { max: 300,   interval: 5000,  secPerSample: 1 },
         "1h":  { max: 60,    interval: 60000, secPerSample: 60 },
         "12h": { max: 720,   interval: 60000, secPerSample: 60 },
@@ -1171,6 +1212,9 @@ export function setupHtmlUI(game: GameScene): void {
         ctx.lineWidth = 1;
         const gridStep = maxVal <= 50 ? 5 : maxVal <= 200 ? 10 : maxVal <= 500 ? 50 : 100;
         const majorStep = gridStep * 5;
+        // 横グリッド描画 — Y軸ラベルを右揃え
+        ctx.font = FONT_STR;
+        const ccuMajorLabels: { text: string; yp: number }[] = [];
         for (let v = gridStep; v < maxVal; v += gridStep) {
             const yp = toY(v);
             if (yp < 0) break;
@@ -1178,10 +1222,14 @@ export function setupHtmlUI(game: GameScene): void {
             ctx.strokeStyle = isMajor ? gridMajor : gridSub;
             ctx.setLineDash(isMajor ? [4, 3] : [2, 5]);
             ctx.beginPath(); ctx.moveTo(0, yp); ctx.lineTo(w, yp); ctx.stroke();
-            if (isMajor) {
-                ctx.fillStyle = labelCol;
-                ctx.font = FONT_STR;
-                ctx.fillText(`${v}`, 2, yp - 2);
+            if (isMajor) ccuMajorLabels.push({ text: `${v}`, yp });
+        }
+        if (ccuMajorLabels.length > 0) {
+            ctx.fillStyle = labelCol;
+            const maxLabelW = Math.max(...ccuMajorLabels.map(l => ctx.measureText(l.text).width));
+            for (const { text, yp } of ccuMajorLabels) {
+                const tw = ctx.measureText(text).width;
+                ctx.fillText(text, 2 + maxLabelW - tw, yp - 2);
             }
         }
         ctx.setLineDash([]);
@@ -1205,18 +1253,30 @@ export function setupHtmlUI(game: GameScene): void {
             return `-${Math.floor(sec / 86400)}d`;
         };
 
+        // ラベルが重ならないよう間引き倍率を計算
+        ctx.font = FONT_STR;
+        const sampleLabelW = ctx.measureText("-23h").width;
+        const minLabelGap = sampleLabelW + 8; // ラベル幅 + 余白
+        const tickPixels = tickStepSamples * step;
+        const labelEvery = tickPixels > 0 ? Math.max(1, Math.ceil(minLabelGap / tickPixels)) : 1;
+
+        let tickIdx = 0;
         for (let n = tickStepSamples; n < histMax; n += tickStepSamples) {
+            tickIdx++;
             const xp = Math.round((histMax - 1 - n) * step);
             if (xp < 0 || xp > w) continue;
+            const showLabel = tickIdx % labelEvery === 0;
             ctx.strokeStyle = dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.12)";
-            ctx.setLineDash([2, 4]);
+            ctx.setLineDash(showLabel ? [2, 4] : [1, 6]);
             ctx.beginPath(); ctx.moveTo(xp, 0); ctx.lineTo(xp, gh); ctx.stroke();
             ctx.setLineDash([]);
-            const label = fmtTime(n * cfg.secPerSample);
-            ctx.fillStyle = labelCol;
-            ctx.font = FONT_STR;
-            const lw = ctx.measureText(label).width;
-            ctx.fillText(label, Math.max(0, Math.min(xp - lw / 2, w - lw)), h - 2);
+            if (showLabel) {
+                const label = fmtTime(n * cfg.secPerSample);
+                ctx.fillStyle = labelCol;
+                ctx.font = FONT_STR;
+                const lw = ctx.measureText(label).width;
+                ctx.fillText(label, Math.max(0, Math.min(xp - lw / 2, w - lw)), h - 2);
+            }
         }
 
         // ベースライン
@@ -1226,26 +1286,51 @@ export function setupHtmlUI(game: GameScene): void {
 
         if (ccuHistory.length === 0) return;
 
-        // エリア塗りつぶし + ライン描画
-        ctx.beginPath();
-        for (let i = 0; i < ccuHistory.length; i++) {
-            const x = offsetX + i * step, y = toY(Math.max(0, ccuHistory[i]));
-            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        }
-        ctx.lineTo(offsetX + (ccuHistory.length - 1) * step, gh);
-        ctx.lineTo(offsetX, gh);
-        ctx.closePath();
-        ctx.fillStyle = "rgba(80,140,255,0.18)";
-        ctx.fill();
+        // エリア塗りつぶし + ライン描画 (-1の区間はスキップ)
+        if (validVals.length > 0) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, 0, w, gh);
+            ctx.clip();
 
-        ctx.beginPath();
-        for (let i = 0; i < ccuHistory.length; i++) {
-            const x = offsetX + i * step, y = toY(Math.max(0, ccuHistory[i]));
-            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            // 連続する有効データ区間(セグメント)を抽出
+            const segments: { start: number; end: number }[] = [];
+            let segStart = -1;
+            for (let i = 0; i < ccuHistory.length; i++) {
+                if (ccuHistory[i] >= 0) {
+                    if (segStart < 0) segStart = i;
+                } else {
+                    if (segStart >= 0) { segments.push({ start: segStart, end: i - 1 }); segStart = -1; }
+                }
+            }
+            if (segStart >= 0) segments.push({ start: segStart, end: ccuHistory.length - 1 });
+
+            for (const seg of segments) {
+                // エリア塗りつぶし
+                ctx.beginPath();
+                for (let i = seg.start; i <= seg.end; i++) {
+                    const x = offsetX + i * step, y = toY(ccuHistory[i]);
+                    if (i === seg.start) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.lineTo(offsetX + seg.end * step, gh);
+                ctx.lineTo(offsetX + seg.start * step, gh);
+                ctx.closePath();
+                ctx.fillStyle = "rgba(80,140,255,0.18)";
+                ctx.fill();
+
+                // ライン描画
+                ctx.beginPath();
+                for (let i = seg.start; i <= seg.end; i++) {
+                    const x = offsetX + i * step, y = toY(ccuHistory[i]);
+                    if (i === seg.start) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.strokeStyle = "rgba(80,140,255,0.85)";
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            }
+
+            ctx.restore();
         }
-        ctx.strokeStyle = "rgba(80,140,255,0.85)";
-        ctx.lineWidth = 3;
-        ctx.stroke();
 
         // 統計ボックス (now / avg / min / max) + ログイン状態
         const latest = ccuHistory[ccuHistory.length - 1];
@@ -1255,7 +1340,6 @@ export function setupHtmlUI(game: GameScene): void {
         const maxV = hasData ? Math.max(...validVals) : undefined;
         const avgV = hasData ? Math.round(validVals.reduce((a, b) => a + b, 0) / validVals.length) : undefined;
         ctx.font = FONT_BOLD;
-        const avgBg = dark ? "rgba(0,0,0,0.5)" : "rgba(255,255,255,0.65)";
         const fmtVal = (v: number | undefined) => v !== undefined ? `${v}` : "";
         const rows = [
             { label: "now", value: fmtVal(loggedIn ? latest : undefined) },
@@ -1269,10 +1353,8 @@ export function setupHtmlUI(game: GameScene): void {
         const valW = Math.max(...rows.map(r => ctx.measureText(r.value || "  ").width));
         const boxW = labelW + valW + pad * 3;
         const boxH = lineH * rows.length + pad * 2;
-        const boxX = w - boxW - 4;
+        const boxX = w - boxW - 16;
         const boxY = 3;
-        ctx.fillStyle = avgBg;
-        ctx.fillRect(boxX, boxY, boxW, boxH);
         ctx.fillStyle = dark ? "#eee" : "#000";
         for (let li = 0; li < rows.length; li++) {
             const y = boxY + pad + FONT_SIZE + li * lineH;

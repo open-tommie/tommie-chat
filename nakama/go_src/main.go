@@ -120,6 +120,7 @@ var (
 	ccuHistory1m   []int   // 1分間隔サンプル（1分間の平均値）
 	ccuHistory1mTs []int64 // 1分間隔サンプルのUnix秒タイムスタンプ
 	ccu1sAccum     []int   // 1分間の1sサンプル蓄積（平均計算用）
+
 )
 
 func appendCcu1sSample(count int) {
@@ -508,7 +509,6 @@ func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *s
 				nowVisible := newAOI.containsChunk(otherPos.CX, otherPos.CZ)
 				if nowVisible && !wasVisible {
 					// このプレイヤーが新しく見えるようになった → OP_AOI_ENTER を送信
-					logger.Debug("[send:AOI_ENTER] to=%s target=%s x=%.1f z=%.1f tex=%s (aoiChange)", sid, otherSID, otherPos.X, otherPos.Z, otherPos.TextureUrl)
 					enterData, _ := json.Marshal(map[string]interface{}{
 						"sessionId":  otherSID,
 						"x":          otherPos.X,
@@ -519,7 +519,6 @@ func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *s
 					dispatcher.BroadcastMessage(opAOIEnter, enterData, []runtime.Presence{senderPresence}, nil, true)
 				} else if wasVisible && !nowVisible {
 					// このプレイヤーがAOI外に出た → OP_AOI_LEAVE を送信
-					logger.Debug("[send:AOI_LEAVE] to=%s target=%s (aoiChange)", sid, otherSID)
 					leaveData, _ := json.Marshal(map[string]interface{}{
 						"sessionId": otherSID,
 					})
@@ -553,7 +552,6 @@ func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *s
 			// 送信者のチャンク位置がAOI内のプレイヤーにだけ送信
 			if p, ok := ms.Positions[sid]; ok {
 				targets := ms.collectAOITargets(sid, p.CX, p.CZ)
-				logger.Debug("[send:INIT_POS] from=%s x=%.1f z=%.1f chunk=(%d,%d) targets=%d", sid, p.X, p.Z, p.CX, p.CZ, len(targets))
 				if len(targets) > 0 {
 					dispatcher.BroadcastMessage(op, msg.GetData(), targets, msg, true)
 				}
@@ -586,7 +584,6 @@ func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *s
 				}
 				// チャンクが変わった場合、新しいチャンクのAOIに入っている他プレイヤーに通知
 				if cx != oldCX || cz != oldCZ {
-					logger.Debug("[send:MOVE_TARGET] from=%s chunk=(%d,%d)->(%d,%d)", sid, oldCX, oldCZ, cx, cz)
 					for otherSID, otherAOI := range ms.AOIs {
 						if otherSID == sid {
 							continue
@@ -597,7 +594,6 @@ func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *s
 							// 他プレイヤーのAOIに自分が入った → OP_AOI_ENTER
 							if otherP, ok := ms.Presences[otherSID]; ok {
 								myPos := ms.Positions[sid]
-								logger.Debug("[send:AOI_ENTER] to=%s target=%s x=%.1f z=%.1f tex=%s (move)", otherSID, sid, myPos.X, myPos.Z, myPos.TextureUrl)
 								enterData, _ := json.Marshal(map[string]interface{}{
 									"sessionId":  sid,
 									"x":          myPos.X,
@@ -610,7 +606,6 @@ func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *s
 						} else if wasVisible && !nowVisible {
 							// 他プレイヤーのAOIから自分が出た → OP_AOI_LEAVE
 							if otherP, ok := ms.Presences[otherSID]; ok {
-								logger.Debug("[send:AOI_LEAVE] to=%s target=%s (move)", otherSID, sid)
 								leaveData, _ := json.Marshal(map[string]interface{}{
 									"sessionId": sid,
 								})
@@ -636,7 +631,6 @@ func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *s
 				TextureUrl string `json:"textureUrl"`
 			}
 			if err := json.Unmarshal(msg.GetData(), &av); err == nil {
-				logger.Debug("[avatarChange] sid=%s textureUrl=%s", sid, av.TextureUrl)
 				if p, ok := ms.Positions[sid]; ok {
 					p.TextureUrl = av.TextureUrl
 				}
@@ -644,7 +638,6 @@ func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *s
 			// 保存済みの位置でAOIフィルタ
 			if p, ok := ms.Positions[sid]; ok {
 				targets := ms.collectAOITargets(sid, p.CX, p.CZ)
-				logger.Debug("[send:AVATAR_CHANGE] from=%s tex=%s targets=%d", sid, av.TextureUrl, len(targets))
 				if len(targets) > 0 {
 					dispatcher.BroadcastMessage(op, msg.GetData(), targets, msg, true)
 				}
@@ -689,7 +682,7 @@ func (m *worldMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db 
 		switch sig.Type {
 		case "getPlayersAOI":
 			return m.handleGetPlayersAOI(ms, data)
-		}
+}
 	}
 
 	// デフォルト: ブロック更新シグナル
@@ -773,6 +766,7 @@ func rpcGetPlayerCount(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 		json.Unmarshal([]byte(payload), &req)
 	}
 
+	// 1秒キャッシュから最新の同接数を取得
 	count := getLatestCcu()
 	out := map[string]interface{}{"count": count}
 	if req.Range != "" {
@@ -1118,7 +1112,7 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 	if err := initializer.RegisterAfterAuthenticateCustom(func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, out *api.Session, in *api.AuthenticateCustomRequest) error {
 		uid, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 		username, _ := ctx.Value(runtime.RUNTIME_CTX_USERNAME).(string)
-		logf("[login] uid=%s username=%s customId=%s\n", uid, username, in.GetAccount().GetId())
+		logf("[login] uid=%s username=%s\n", uid, username)
 		return nil
 	}); err != nil {
 		return err

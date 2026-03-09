@@ -30,6 +30,11 @@ export class NakamaService {
     onBlockUpdate?:      (gx: number, gz: number, blockId: number, r: number, g: number, b: number, a: number) => void;
     onAOIEnter?:         (sessionId: string, x: number, z: number, ry: number, textureUrl: string) => void;
     onAOILeave?:         (sessionId: string) => void;
+    onMatchDisconnect?:  () => void;
+    onMatchReconnect?:   () => void;
+
+    private reconnecting = false;
+    private loginName: string | null = null;
 
     constructor(host = "127.0.0.1", port = "7350", useSSL = false) {
         this.client = new Client("defaultkey", host, port, useSSL);
@@ -38,6 +43,7 @@ export class NakamaService {
     async login(loginName: string, host = "127.0.0.1", port = "7350"): Promise<Session> {
         this.host = host;
         this.port = port;
+        this.loginName = loginName;
         this.client = new Client("defaultkey", host, port, false);
         this.session = await this.client.authenticateCustom(loginName, true, loginName);
 
@@ -45,10 +51,7 @@ export class NakamaService {
         this.socket.setHeartbeatTimeoutMs(60000);
         await this.socket.connect(this.session, true);
 
-        this.socket.onchannelmessage = (msg: ChannelMessage) => {
-            const content = msg.content as { text?: string };
-            if (content?.text) this.onChatMessage?.(msg.username ?? "", content.text, msg.sender_id ?? "");
-        };
+        this.setupSocketHandlers();
 
         const ch: Channel = await this.socket.joinChat(CHAT_ROOM, CHAT_TYPE, true, false);
         this.channelId = ch.id;
@@ -75,6 +78,57 @@ export class NakamaService {
         };
 
         return this.session;
+    }
+
+    private setupSocketHandlers(): void {
+        if (!this.socket) return;
+        this.socket.onchannelmessage = (msg: ChannelMessage) => {
+            const content = msg.content as { text?: string };
+            if (content?.text) this.onChatMessage?.(msg.username ?? "", content.text, msg.sender_id ?? "");
+        };
+        this.socket.ondisconnect = () => {
+            console.warn("[NakamaService] WebSocket disconnected");
+            this.onMatchDisconnect?.();
+            this.tryReconnect();
+        };
+    }
+
+    private async tryReconnect(): Promise<void> {
+        if (this.reconnecting || !this.session || !this.loginName) return;
+        this.reconnecting = true;
+        const delays = [1000, 2000, 4000, 8000, 15000];
+        for (let attempt = 0; attempt < delays.length; attempt++) {
+            await new Promise(r => setTimeout(r, delays[attempt]));
+            if (!this.session) { this.reconnecting = false; return; } // logged out
+            try {
+                console.log(`[NakamaService] reconnect attempt ${attempt + 1}/${delays.length}`);
+                this.socket = this.client.createSocket(false, false);
+                this.socket.setHeartbeatTimeoutMs(60000);
+                await this.socket.connect(this.session, true);
+                this.setupSocketHandlers();
+                // チャットチャンネル再参加
+                const ch = await this.socket.joinChat(CHAT_ROOM, CHAT_TYPE, true, false);
+                this.channelId = ch.id;
+                if (ch.self?.session_id) this.selfSessionId = ch.self.session_id;
+                this.socket.onchannelpresence = (event: ChannelPresenceEvent) => {
+                    for (const p of event.joins ?? []) {
+                        this.onPresenceJoin?.(p.session_id ?? "", p.user_id, p.username);
+                        this.onPresenceNewJoin?.(p.session_id ?? "", p.user_id, p.username);
+                    }
+                    for (const p of event.leaves ?? []) this.onPresenceLeave?.(p.session_id ?? "", p.user_id, p.username);
+                };
+                // マッチ再参加
+                await this.joinWorldMatch();
+                console.log("[NakamaService] reconnected successfully");
+                this.onMatchReconnect?.();
+                this.reconnecting = false;
+                return;
+            } catch (e) {
+                console.warn(`[NakamaService] reconnect attempt ${attempt + 1} failed:`, e);
+            }
+        }
+        console.error("[NakamaService] all reconnect attempts failed");
+        this.reconnecting = false;
     }
 
     async joinWorldMatch(): Promise<void> {
