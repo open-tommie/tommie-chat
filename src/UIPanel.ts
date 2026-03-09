@@ -469,23 +469,22 @@ export function setupHtmlUI(game: GameScene): void {
     const userListBody = document.getElementById("user-list-body") as HTMLTableSectionElement;
 
     const formatTimestamp = (date: Date): string => {
-        const off = -date.getTimezoneOffset();
-        const sign = off >= 0 ? "+" : "-";
-        const p2 = (n: number) => String(Math.abs(n)).padStart(2, "0");
-        const tz = `${sign}${p2(Math.floor(Math.abs(off) / 60))}:${p2(Math.abs(off) % 60)}`;
-        return `${date.getFullYear()}-${p2(date.getMonth() + 1)}-${p2(date.getDate())}T`
-             + `${p2(date.getHours())}:${p2(date.getMinutes())}:${p2(date.getSeconds())}${tz}`;
+        return date.toLocaleString(undefined, {
+            year: "numeric", month: "2-digit", day: "2-digit",
+            hour: "2-digit", minute: "2-digit", second: "2-digit",
+        });
     };
 
-    const userMap = new Map<string, { username: string; uuid: string; sessionId: string; loginTimestamp: number; loginTime: string }>();
-    type UlSortKey = "username" | "uuid" | "sessionId" | "loginTime" | "loginTimestamp";
+    const userMap = new Map<string, { username: string; displayName: string; uuid: string; sessionId: string; loginTimestamp: number; loginTime: string }>();
+    type UlSortKey = "username" | "displayName" | "uuid" | "sessionId" | "loginTime" | "loginTimestamp";
     let ulSortKey: UlSortKey = "username";
     let ulSortAsc = true;
-    const thUser = document.getElementById("ul-th-user") as HTMLTableCellElement;
-    const thUuid = document.getElementById("ul-th-uuid") as HTMLTableCellElement;
-    const thSid  = document.getElementById("ul-th-sid")  as HTMLTableCellElement;
-    const thTime = document.getElementById("ul-th-time") as HTMLTableCellElement;
-    const thRel  = document.getElementById("ul-th-rel")  as HTMLTableCellElement;
+    const thUser  = document.getElementById("ul-th-user")  as HTMLTableCellElement;
+    const thDname = document.getElementById("ul-th-dname") as HTMLTableCellElement;
+    const thUuid  = document.getElementById("ul-th-uuid")  as HTMLTableCellElement;
+    const thSid   = document.getElementById("ul-th-sid")   as HTMLTableCellElement;
+    const thTime  = document.getElementById("ul-th-time")  as HTMLTableCellElement;
+    const thRel   = document.getElementById("ul-th-rel")   as HTMLTableCellElement;
 
     const relativeTime = (ts: number): string => {
         const secs = Math.floor((Date.now() - ts) / 1000);
@@ -504,21 +503,35 @@ export function setupHtmlUI(game: GameScene): void {
         const entries = [...userMap.values()].sort((a, b) => {
             if (ulSortKey === "loginTimestamp")
                 return ulSortAsc ? a.loginTimestamp - b.loginTimestamp : b.loginTimestamp - a.loginTimestamp;
-            const va = a[ulSortKey as "username" | "uuid" | "sessionId" | "loginTime"] ?? "";
-            const vb = b[ulSortKey as "username" | "uuid" | "sessionId" | "loginTime"] ?? "";
+            const va = a[ulSortKey as "username" | "displayName" | "uuid" | "sessionId" | "loginTime"] ?? "";
+            const vb = b[ulSortKey as "username" | "displayName" | "uuid" | "sessionId" | "loginTime"] ?? "";
             return ulSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
         });
         const arrow = ulSortAsc ? "▲" : "▼";
-        if (thUser) thUser.dataset.sort = ulSortKey === "username"        ? arrow : "";
-        if (thUuid) thUuid.dataset.sort = ulSortKey === "uuid"            ? arrow : "";
-        if (thSid)  thSid.dataset.sort  = ulSortKey === "sessionId"       ? arrow : "";
-        if (thTime) thTime.dataset.sort = ulSortKey === "loginTime"       ? arrow : "";
-        if (thRel)  thRel.dataset.sort  = ulSortKey === "loginTimestamp"  ? arrow : "";
+        if (thUser)  thUser.dataset.sort  = ulSortKey === "username"        ? arrow : "";
+        if (thDname) thDname.dataset.sort = ulSortKey === "displayName"   ? arrow : "";
+        if (thUuid)  thUuid.dataset.sort  = ulSortKey === "uuid"          ? arrow : "";
+        if (thSid)   thSid.dataset.sort   = ulSortKey === "sessionId"     ? arrow : "";
+        if (thTime)  thTime.dataset.sort  = ulSortKey === "loginTime"     ? arrow : "";
+        if (thRel)   thRel.dataset.sort   = ulSortKey === "loginTimestamp" ? arrow : "";
         const myId = game.nakama.selfSessionId ?? "";
-        for (const { username, uuid, sessionId, loginTimestamp, loginTime } of entries) {
+        for (const { username, displayName, uuid, sessionId, loginTimestamp, loginTime } of entries) {
             const tr = document.createElement("tr");
             const bold = sessionId === myId ? " class=\"ul-self\"" : "";
-            tr.innerHTML = `<td${bold}>${username}</td><td class="uuid-cell">${uuid}</td><td class="uuid-cell">${sessionId}</td><td>${relativeTime(loginTimestamp)}</td><td>${loginTime}</td>`;
+            const rel = relativeTime(loginTimestamp);
+            tr.innerHTML = `<td${bold} title="${username}">${username}</td><td title="${displayName}">${displayName}</td><td class="uuid-cell" title="${uuid}&#10;クリックでコピー">${uuid}</td><td class="uuid-cell" title="${sessionId}&#10;クリックでコピー">${sessionId}</td><td title="${rel}">${rel}</td><td title="${loginTime}">${loginTime}</td>`;
+            // uuid-cell click to copy
+            tr.querySelectorAll(".uuid-cell").forEach(td => {
+                td.addEventListener("click", () => {
+                    const text = (td as HTMLElement).textContent ?? "";
+                    navigator.clipboard.writeText(text).then(() => {
+                        const orig = (td as HTMLElement).textContent;
+                        (td as HTMLElement).textContent = "コピー済み";
+                        (td as HTMLElement).style.color = "#28a745";
+                        setTimeout(() => { (td as HTMLElement).textContent = orig; (td as HTMLElement).style.color = ""; }, 1000);
+                    });
+                });
+            });
             userListBody.appendChild(tr);
         }
     };
@@ -528,20 +541,21 @@ export function setupHtmlUI(game: GameScene): void {
         else { ulSortKey = key; ulSortAsc = true; }
         renderUserList();
     };
-    if (thUser) thUser.addEventListener("click", () => setUlSort("username"));
-    if (thUuid) thUuid.addEventListener("click", () => setUlSort("uuid"));
-    if (thSid)  thSid.addEventListener("click",  () => setUlSort("sessionId"));
-    if (thTime) thTime.addEventListener("click", () => setUlSort("loginTime"));
-    if (thRel)  thRel.addEventListener("click",  () => setUlSort("loginTimestamp"));
+    if (thUser)  thUser.addEventListener("click",  () => setUlSort("username"));
+    if (thDname) thDname.addEventListener("click", () => setUlSort("displayName"));
+    if (thUuid)  thUuid.addEventListener("click",  () => setUlSort("uuid"));
+    if (thSid)   thSid.addEventListener("click",   () => setUlSort("sessionId"));
+    if (thTime)  thTime.addEventListener("click",  () => setUlSort("loginTime"));
+    if (thRel)   thRel.addEventListener("click",   () => setUlSort("loginTimestamp"));
 
     setInterval(renderUserList, 10000);
 
     const fetchAndSetLoginTime = async (sessionId: string, userId: string, _username: string) => {
         const isoStr = await game.nakama.getSessionLoginTime(userId, sessionId);
         const loginDate = isoStr ? new Date(isoStr) : new Date();
-        const existing = userMap.get(userId);
+        const existing = userMap.get(sessionId);
         if (existing) {
-            userMap.set(userId, { ...existing, loginTime: formatTimestamp(loginDate), loginTimestamp: loginDate.getTime() });
+            userMap.set(sessionId, { ...existing, loginTime: formatTimestamp(loginDate), loginTimestamp: loginDate.getTime() });
             renderUserList();
         }
     };
@@ -549,12 +563,12 @@ export function setupHtmlUI(game: GameScene): void {
     // Nakama コールバック設定
     game.nakama.onChatMessage = (username, text, userId) => {
         addChatHistory(username, text);
-        for (const [sid, user] of userMap) {
+        for (const [sessionId, user] of userMap) {
             if (user.uuid !== userId) continue;
-            if (sid === game.nakama.selfSessionId) {
+            if (sessionId === game.nakama.selfSessionId) {
                 doUpdateSpeech(text);
             } else {
-                game.remoteSpeeches.get(sid)?.(text);
+                game.remoteSpeeches.get(sessionId)?.(text);
             }
         }
     };
@@ -575,8 +589,8 @@ export function setupHtmlUI(game: GameScene): void {
         const av = game.remoteAvatars.get(sessionId);
         if (av) game.avatarSystem.changeAvatarTexture(av, textureUrl);
     };
-    game.nakama.onAOIEnter = (sessionId: string, x: number, z: number, ry: number, textureUrl: string) => {
-        console.log(`[AOI_ENTER] sid=${sessionId} x=${x} z=${z} ry=${ry} tex=${textureUrl}`);
+    game.nakama.onAOIEnter = (sessionId: string, x: number, z: number, ry: number, textureUrl: string, displayName: string) => {
+        console.log(`[AOI_ENTER] sid=${sessionId} x=${x} z=${z} ry=${ry} tex=${textureUrl} dname=${displayName}`);
         if (sessionId === game.nakama.selfSessionId) return;
         const av = game.remoteAvatars.get(sessionId);
         if (av) {
@@ -584,7 +598,25 @@ export function setupHtmlUI(game: GameScene): void {
             av.setEnabled(true);
             game.remoteTargets.delete(sessionId);
             if (textureUrl) game.avatarSystem.changeAvatarTexture(av, textureUrl);
+            if (displayName) {
+                const updater = game.remoteNameUpdaters.get(sessionId);
+                if (updater) updater(displayName);
+            }
         }
+    };
+    game.nakama.onDisplayName = (sessionId: string, displayName: string) => {
+        console.log(`[onDisplayName] sid=${sessionId} displayName=${displayName}`);
+        // アバターのnameTag更新
+        const updater = game.remoteNameUpdaters.get(sessionId);
+        if (updater) updater(displayName);
+        // ユーザリストの表示名更新
+        for (const [sid, entry] of userMap) {
+            if (entry.sessionId === sessionId) {
+                userMap.set(sid, { ...entry, displayName });
+                break;
+            }
+        }
+        renderUserList();
     };
     game.nakama.onAOILeave = (sessionId: string) => {
         console.log(`[AOI_LEAVE] sid=${sessionId}`);
@@ -606,6 +638,7 @@ export function setupHtmlUI(game: GameScene): void {
             (standBase.material as StandardMaterial).diffuseColor = new Color3(0.4, 0.7, 1.0);
         }
         const nameTag = game.avatarSystem.createNameTag(av, username);
+        game.remoteNameUpdaters.set(sessionId, nameTag.update);
         try {
             const updater = game.avatarSystem.createSpeechBubble(nameTag.plane, "");
             game.remoteSpeeches.set(sessionId, updater);
@@ -621,28 +654,46 @@ export function setupHtmlUI(game: GameScene): void {
         game.remoteAvatars.delete(sessionId);
         game.remoteTargets.delete(sessionId);
         game.remoteSpeeches.delete(sessionId);
+        game.remoteNameUpdaters.delete(sessionId);
+    };
+
+    const fetchAndSetDisplayName = async (sessionId: string, userId: string) => {
+        try {
+            const names = await game.nakama.getDisplayNames([userId]);
+            const dname = names.get(userId) ?? "";
+            const existing = userMap.get(sessionId);
+            if (existing) {
+                userMap.set(sessionId, { ...existing, displayName: dname });
+                renderUserList();
+                // アバターのnameTagをdisplay_nameで更新
+                if (dname) {
+                    const updater = game.remoteNameUpdaters.get(sessionId);
+                    if (updater) updater(dname);
+                }
+            }
+        } catch { /* ignore */ }
     };
 
     game.nakama.onPresenceJoin = (sessionId, userId, username) => {
-        userMap.set(userId, { username, uuid: userId, sessionId, loginTimestamp: Date.now(), loginTime: "…" });
+        userMap.set(sessionId, { username, displayName: "", uuid: userId, sessionId, loginTimestamp: Date.now(), loginTime: "…" });
         renderUserList();
         fetchAndSetLoginTime(sessionId, userId, username);
+        fetchAndSetDisplayName(sessionId, userId);
         addRemoteAvatar(sessionId, username);
     };
     game.nakama.onPresenceNewJoin = (sessionId, userId, username) => {
-        userMap.set(userId, { username, uuid: userId, sessionId, loginTimestamp: Date.now(), loginTime: "…" });
+        userMap.set(sessionId, { username, displayName: "", uuid: userId, sessionId, loginTimestamp: Date.now(), loginTime: "…" });
         renderUserList();
         fetchAndSetLoginTime(sessionId, userId, username);
+        fetchAndSetDisplayName(sessionId, userId);
         addChatHistory("[system]", `${username}がログインしました。`);
         addRemoteAvatar(sessionId, username);
         { const p = game.playerBox; game.nakama.sendInitPos(p.position.x, p.position.z, p.rotation.y).catch(() => {}); }
         game.nakama.sendAvatarChange(game.playerTextureUrl).catch(() => {});
     };
     game.nakama.onPresenceLeave = (sessionId, _userId, uname) => {
-        // 現在のセッションIDが一致する場合のみ削除（リコネクト後の旧セッション離脱を無視）
-        const entry = userMap.get(_userId);
-        if (entry && entry.sessionId === sessionId) {
-            userMap.delete(_userId);
+        if (userMap.has(sessionId)) {
+            userMap.delete(sessionId);
             addChatHistory("[system]", `${uname}がログアウトしました。`);
         }
         renderUserList();
@@ -655,6 +706,7 @@ export function setupHtmlUI(game: GameScene): void {
             loginBtn.onclick = doLogin;
         }
         if (loginNameInput) {
+            loginNameInput.disabled = false;
             loginNameInput.onkeydown = (e) => {
                 if (e.key === "Enter") { e.preventDefault(); doLogin(); }
             };
@@ -684,13 +736,11 @@ export function setupHtmlUI(game: GameScene): void {
         const list = document.getElementById("server-log-list");
         if (!list) return;
         const now = new Date();
-        const off = -now.getTimezoneOffset();
-        const sign = off >= 0 ? "+" : "-";
-        const p2 = (n: number) => String(Math.abs(n)).padStart(2, "0");
-        const tz = `${sign}${p2(Math.floor(Math.abs(off) / 60))}:${p2(Math.abs(off) % 60)}`;
-        const ts = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}T`
-                 + `${p2(now.getHours())}:${p2(now.getMinutes())}:${p2(now.getSeconds())}.`
-                 + `${String(now.getMilliseconds()).padStart(3, "0")}${tz}`;
+        const ts = now.toLocaleString(undefined, {
+            year: "numeric", month: "2-digit", day: "2-digit",
+            hour: "2-digit", minute: "2-digit", second: "2-digit",
+            fractionalSecondDigits: 3,
+        }) as string;
         const entry = document.createElement("div");
         entry.className = "server-log-entry";
         entry.textContent = hint
@@ -729,6 +779,18 @@ export function setupHtmlUI(game: GameScene): void {
         try {
             await game.nakama.login(name, host, port);
             game.currentUserId = game.nakama.getSession()?.user_id ?? null;
+            // 自分のdisplay_nameでアバター名を更新
+            if (game.currentUserId) {
+                const displayNameInput = document.getElementById("displayNameInput") as HTMLInputElement | null;
+                game.nakama.getDisplayNames([game.currentUserId]).then(names => {
+                    const dname = names.get(game.currentUserId!) ?? "";
+                    if (dname) {
+                        game.updatePlayerNameTag(dname);
+                        if (displayNameInput) displayNameInput.value = dname;
+                        confirmedDisplayName = dname;
+                    }
+                }).catch(() => {});
+            }
             await game.loadChunksFromDB(game.currentUserId ?? "anonymous");
             await game.nakama.joinWorldMatch();
 
@@ -784,7 +846,9 @@ export function setupHtmlUI(game: GameScene): void {
                 loginBtn.style.background = "#e0509099";
                 loginBtn.onclick = doLogout;
             }
-            if (loginNameInput) loginNameInput.onkeydown = null;
+            if (loginNameInput) { loginNameInput.onkeydown = null; loginNameInput.disabled = true; }
+            { const di = document.getElementById("displayNameInput") as HTMLInputElement | null; if (di) di.disabled = false; }
+            { const db = document.getElementById("displayNameBtn") as HTMLButtonElement | null; if (db) db.disabled = false; }
             // WebSocket切断時の自動再接続コールバック
             game.nakama.onMatchDisconnect = () => {
                 console.warn("[UIPanel] match disconnected, auto-reconnect in progress");
@@ -819,6 +883,7 @@ export function setupHtmlUI(game: GameScene): void {
             if (reason === "Not Found") reason += ": サーバに接続できません。サーバが動いていないか、URLかポート番号が間違っている可能性があります。";
             const hint = reason.includes("Failed to parse URL") ? "URLの形式が違います。"
                        : reason === "Failed to fetch"           ? "サーバが稼働していないか、URL、ポート番号が間違っている可能性があります。"
+                       : reason.includes("Username is already in use") ? "Device auth error: username conflict. この名前は既に別の認証方式で使用されています。別の名前を試してください。"
                        : "";
             addServerLog(host, port, "ログイン失敗", reason, hint);
             if (loginStatus) {
@@ -829,6 +894,59 @@ export function setupHtmlUI(game: GameScene): void {
             if (loginBtn) loginBtn.disabled = false;
         }
     };
+
+    // ===== 表示名設定 =====
+    let confirmedDisplayName = "";
+    {
+        const displayNameInput = document.getElementById("displayNameInput") as HTMLInputElement | null;
+        const displayNameBtn = document.getElementById("displayNameBtn") as HTMLButtonElement | null;
+        const displayNameStatus = document.getElementById("displayNameStatus") as HTMLSpanElement | null;
+        if (displayNameInput && displayNameBtn) {
+            displayNameInput.addEventListener("input", () => {
+                const changed = !displayNameInput.disabled && displayNameInput.value.trim() !== confirmedDisplayName && displayNameInput.value.trim() !== "";
+                displayNameBtn.disabled = !changed;
+                displayNameBtn.style.background = changed ? "#28a745" : "";
+            });
+        }
+        const doChangeDisplayName = async () => {
+            if (!displayNameInput) return;
+            const name = displayNameInput.value.trim();
+            if (!name) return;
+            if (/[\x00-\x1f\x7f]/.test(name)) {
+                if (displayNameStatus) { displayNameStatus.style.color = "#ff4444"; displayNameStatus.textContent = "✗ 制御文字は使えません"; }
+                return;
+            }
+            if (!game.nakama.getSession()) {
+                if (displayNameStatus) { displayNameStatus.style.color = "#ff8800"; displayNameStatus.textContent = "先にログインしてください"; }
+                return;
+            }
+            try {
+                await game.nakama.updateDisplayName(name);
+                game.nakama.sendDisplayName(name).catch(() => {});
+                game.updatePlayerNameTag(name);
+                // 自分のユーザリスト表示名も更新
+                const mySid = game.nakama.selfSessionId;
+                if (mySid) {
+                    const me = userMap.get(mySid);
+                    if (me) { userMap.set(mySid, { ...me, displayName: name }); renderUserList(); }
+                }
+                confirmedDisplayName = name;
+                if (displayNameBtn) { displayNameBtn.disabled = true; displayNameBtn.style.background = ""; }
+                if (displayNameStatus) { displayNameStatus.style.color = "#00dd55"; displayNameStatus.textContent = "✓ 設定完了"; }
+                addServerLog(loggedInHost || "127.0.0.1", loggedInPort || "7350", "表示名変更", `表示名を「${name}」に設定しました`);
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                if (displayNameStatus) { displayNameStatus.style.color = "#ff4444"; displayNameStatus.textContent = "✗ " + msg; }
+                addServerLog(loggedInHost || "127.0.0.1", loggedInPort || "7350", "表示名変更失敗", msg);
+            }
+        };
+        if (displayNameInput) {
+            displayNameInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); doChangeDisplayName(); } };
+        }
+        if (displayNameBtn) {
+            displayNameBtn.onclick = doChangeDisplayName;
+        }
+    }
 
     // ===== ping 計測 & グラフ =====
     const pingDisplay    = document.getElementById("ping-display");
@@ -1514,6 +1632,10 @@ export function setupHtmlUI(game: GameScene): void {
         game.remoteAvatars.clear();
         if (loginStatus) { loginStatus.style.color = "#00dd55"; loginStatus.textContent = isMobile ? "" : "ログインして下さい！"; }
         if (loginBtn) loginBtn.style.background = "#28a74580";
+        { const di = document.getElementById("displayNameInput") as HTMLInputElement | null; if (di) { di.disabled = true; di.value = ""; } }
+        { const db = document.getElementById("displayNameBtn") as HTMLButtonElement | null; if (db) db.disabled = true; }
+        confirmedDisplayName = "";
+        { const ds = document.getElementById("displayNameStatus") as HTMLSpanElement | null; if (ds) ds.textContent = ""; }
         setLoginMode();
     };
 

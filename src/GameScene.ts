@@ -52,6 +52,7 @@ export class GameScene {
     remoteAvatars = new Map<string, Mesh>();
     remoteTargets = new Map<string, { x: number; z: number }>();
     remoteSpeeches = new Map<string, (text: string) => void>();
+    remoteNameUpdaters = new Map<string, (newName: string) => void>();
 
     // ===== 地面ブロック =====
     chunks = new Map<string, { cells: Uint8Array; hash: bigint }>();

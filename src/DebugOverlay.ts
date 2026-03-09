@@ -761,13 +761,13 @@ export function setupDebugOverlay(game: GameScene): void {
         const pd = document.getElementById("ping-display");
         if (pd) {
             if (game.latestPingAvg !== null && game.latestPingAvg < 0) {
-                pd.innerHTML = `<span style="color:rgba(220,80,80,0.6)">未接続</span> 回線切断中 FPS=${fps}`;
+                pd.innerHTML = `<span style="background:#8b2020;color:#fff;padding:2px 6px;border-radius:3px">● 未接続</span> 回線切断中 FPS=${fps}`;
                 pd.style.color = "#ff4444";
             } else if (game.latestPingAvg !== null) {
-                pd.innerHTML = `<span style="color:rgba(80,180,80,0.6)">ログイン中</span> ping=${game.latestPingAvg}ms FPS=${fps}`;
+                pd.innerHTML = `<span style="background:#2d8a2d;color:#fff;padding:2px 6px;border-radius:3px">● ログイン中</span> ping=${game.latestPingAvg}ms FPS=${fps}`;
                 pd.style.color = "";
             } else {
-                pd.innerHTML = `<span style="color:rgba(220,80,80,0.6)">未接続</span> ping=--ms FPS=${fps}`;
+                pd.innerHTML = `<span style="background:#8b2020;color:#fff;padding:2px 6px;border-radius:3px">● 未接続</span> ping=--ms FPS=${fps}`;
                 pd.style.color = "";
             }
         }

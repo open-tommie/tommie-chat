@@ -9,6 +9,7 @@ const OP_BLOCK_UPDATE  = 4; // ブロック設置/削除通知
 const OP_AOI_UPDATE    = 5; // AOI（チャンク範囲）更新
 const OP_AOI_ENTER     = 6; // AOI内に入ったプレイヤー情報
 const OP_AOI_LEAVE     = 7; // AOI外に出たプレイヤー通知
+const OP_DISPLAY_NAME  = 8; // 表示名変更通知
 
 export class NakamaService {
     private client: Client;
@@ -28,8 +29,9 @@ export class NakamaService {
     onAvatarMoveTarget?: (sessionId: string, x: number, z: number) => void;
     onAvatarChange?:     (sessionId: string, textureUrl: string) => void;
     onBlockUpdate?:      (gx: number, gz: number, blockId: number, r: number, g: number, b: number, a: number) => void;
-    onAOIEnter?:         (sessionId: string, x: number, z: number, ry: number, textureUrl: string) => void;
+    onAOIEnter?:         (sessionId: string, x: number, z: number, ry: number, textureUrl: string, displayName: string) => void;
     onAOILeave?:         (sessionId: string) => void;
+    onDisplayName?:      (sessionId: string, displayName: string) => void;
     onMatchDisconnect?:  () => void;
     onMatchReconnect?:   () => void;
 
@@ -40,12 +42,30 @@ export class NakamaService {
         this.client = new Client("defaultkey", host, port, useSSL);
     }
 
+    private getOrCreateDeviceId(loginName: string): string {
+        const key = `nakama_device_id_${loginName}`;
+        let deviceId = localStorage.getItem(key);
+        if (!deviceId) {
+            deviceId = crypto.randomUUID();
+            localStorage.setItem(key, deviceId);
+        }
+        return deviceId;
+    }
+
     async login(loginName: string, host = "127.0.0.1", port = "7350"): Promise<Session> {
         this.host = host;
         this.port = port;
         this.loginName = loginName;
         this.client = new Client("defaultkey", host, port, false);
-        this.session = await this.client.authenticateCustom(loginName, true, loginName);
+        const deviceId = this.getOrCreateDeviceId(loginName);
+        this.session = await this.client.authenticateDevice(deviceId, true);
+        // デバイス認証後にusernameを設定し、セッションを再取得（JWTにusernameを反映）
+        if (this.session.username !== loginName) {
+            await this.client.updateAccount(this.session, { username: loginName });
+            this.session = await this.client.authenticateDevice(deviceId, false);
+        }
+        console.log("[NakamaService] session token:", this.session.token);
+        console.log("[NakamaService] username:", this.session.username);
 
         this.socket = this.client.createSocket(false, false);
         this.socket.setHeartbeatTimeoutMs(60000);
@@ -148,13 +168,17 @@ export class NakamaService {
                     const blk = payload as { gx: number; gz: number; blockId: number; r: number; g: number; b: number; a: number };
                     this.onBlockUpdate?.(blk.gx, blk.gz, blk.blockId, blk.r ?? 255, blk.g ?? 255, blk.b ?? 255, blk.a ?? 255);
                 } else if (md.op_code === OP_AOI_ENTER) {
-                    const e = payload as { sessionId: string; x: number; z: number; ry?: number; textureUrl?: string };
-                    console.log(`[recv:AOI_ENTER] sid=${e.sessionId} x=${e.x} z=${e.z} tex=${e.textureUrl ?? ""}`);
-                    this.onAOIEnter?.(e.sessionId, e.x, e.z, e.ry ?? 0, e.textureUrl ?? "");
+                    const e = payload as { sessionId: string; x: number; z: number; ry?: number; textureUrl?: string; displayName?: string };
+                    console.log(`[recv:AOI_ENTER] sid=${e.sessionId} x=${e.x} z=${e.z} tex=${e.textureUrl ?? ""} dname=${e.displayName ?? ""}`);
+                    this.onAOIEnter?.(e.sessionId, e.x, e.z, e.ry ?? 0, e.textureUrl ?? "", e.displayName ?? "");
                 } else if (md.op_code === OP_AOI_LEAVE) {
                     const e = payload as { sessionId: string };
                     console.log(`[recv:AOI_LEAVE] sid=${e.sessionId}`);
                     this.onAOILeave?.(e.sessionId);
+                } else if (md.op_code === OP_DISPLAY_NAME && sid) {
+                    const dn = payload as { displayName: string };
+                    console.log(`[recv:DISPLAY_NAME] sid=${sid} dname=${dn.displayName}`);
+                    this.onDisplayName?.(sid, dn.displayName);
                 } else if (!sid) {
                     return;
                 } else if (md.op_code === OP_INIT_POS) {
@@ -185,6 +209,13 @@ export class NakamaService {
         if (!this.socket || !this.matchId) return;
         try {
             await this.socket.sendMatchState(this.matchId, OP_AVATAR_CHANGE, JSON.stringify({ textureUrl }));
+        } catch { /* ignore */ }
+    }
+
+    async sendDisplayName(displayName: string): Promise<void> {
+        if (!this.socket || !this.matchId) return;
+        try {
+            await this.socket.sendMatchState(this.matchId, OP_DISPLAY_NAME, new TextEncoder().encode(JSON.stringify({ displayName })));
         } catch { /* ignore */ }
     }
 
@@ -220,6 +251,21 @@ export class NakamaService {
 
     getSession(): Session | null {
         return this.session;
+    }
+
+    async updateDisplayName(displayName: string): Promise<void> {
+        if (!this.session) throw new Error("not logged in");
+        await this.client.updateAccount(this.session, { display_name: displayName });
+    }
+
+    async getDisplayNames(userIds: string[]): Promise<Map<string, string>> {
+        const result = new Map<string, string>();
+        if (!this.session || userIds.length === 0) return result;
+        const users = await this.client.getUsers(this.session, userIds);
+        for (const u of users.users ?? []) {
+            result.set(u.id!, u.display_name ?? "");
+        }
+        return result;
     }
 
     async getServerInfo(): Promise<string> {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -36,6 +37,7 @@ const (
 	opAOIUpdate    int64 = 5
 	opAOIEnter     int64 = 6 // AOI内に入ったプレイヤー情報
 	opAOILeave     int64 = 7 // AOI外に出たプレイヤー通知
+	opDisplayName  int64 = 8 // 表示名変更通知
 )
 
 // 地面セル: blockID (uint16) + RGBA 各1バイト
@@ -155,12 +157,18 @@ func flushCcu1mSample() {
 // getCcuHistoryRange は指定レンジの履歴を返す
 // "1m"=直近60件(1s), "5m"=直近300件(1s), "1h"=直近60件(1m),
 // "12h"=直近720件(1m), "1d"=直近1440件(1m), "10d"=全件(1m)
-func getCcuHistoryRange(rangeStr string) []int {
+type ccuHistoryResult struct {
+	Values     []int
+	Timestamps []int64 // Unix秒。1sデータの場合はnil
+}
+
+func getCcuHistoryRange(rangeStr string) ccuHistoryResult {
 	ccuMu.Lock()
 	defer ccuMu.Unlock()
 
 	var src []int
 	var n int
+	var maxSec int64 // 期間の秒数（0=件数のみでフィルタ）
 	switch rangeStr {
 	case "1m":
 		src = ccuHistory1s
@@ -171,26 +179,48 @@ func getCcuHistoryRange(rangeStr string) []int {
 	case "1h":
 		src = ccuHistory1m
 		n = 60
+		maxSec = 3600
 	case "12h":
 		src = ccuHistory1m
 		n = 720
+		maxSec = 12 * 3600
 	case "1d":
 		src = ccuHistory1m
 		n = 1440
+		maxSec = 24 * 3600
 	case "10d":
 		src = ccuHistory1m
 		n = 14400
+		maxSec = 10 * 24 * 3600
 	default:
 		src = ccuHistory1s
 		n = 300
 	}
 
+	// 1分間隔データはタイムスタンプでフィルタ（サーバ停止中のギャップを除外）
+	if maxSec > 0 && len(ccuHistory1mTs) == len(src) {
+		cutoff := time.Now().Unix() - maxSec
+		startIdx := len(src)
+		for i := len(ccuHistory1mTs) - 1; i >= 0; i-- {
+			if ccuHistory1mTs[i] < cutoff {
+				break
+			}
+			startIdx = i
+		}
+		vals := make([]int, len(src)-startIdx)
+		copy(vals, src[startIdx:])
+		ts := make([]int64, len(vals))
+		copy(ts, ccuHistory1mTs[startIdx:])
+		return ccuHistoryResult{Values: vals, Timestamps: ts}
+	}
+
 	if n > len(src) {
 		n = len(src)
 	}
-	out := make([]int, n)
-	copy(out, src[len(src)-n:])
-	return out
+	vals := make([]int, n)
+	copy(vals, src[len(src)-n:])
+	// 1sデータにはタイムスタンプなし
+	return ccuHistoryResult{Values: vals}
 }
 
 func getLatestCcu() int {
@@ -281,19 +311,21 @@ func loadCcuHistory1m(ctx context.Context, nk runtime.NakamaModule, logger runti
 		logger.Warn("loadCcuHistory1m: length mismatch ts=%d vals=%d", len(stored.Timestamps), len(stored.Values))
 		return
 	}
-	// 過去10日分のみフィルタ
+	// 過去10日分のみフィルタ＋重複タイムスタンプ除去
 	cutoff := time.Now().Unix() - int64(10*24*60*60)
+	seen := make(map[int64]bool, len(stored.Timestamps))
 	ccuMu.Lock()
 	ccuHistory1m = ccuHistory1m[:0]
 	ccuHistory1mTs = ccuHistory1mTs[:0]
 	for i, t := range stored.Timestamps {
-		if t >= cutoff {
+		if t >= cutoff && !seen[t] {
+			seen[t] = true
 			ccuHistory1m = append(ccuHistory1m, stored.Values[i])
 			ccuHistory1mTs = append(ccuHistory1mTs, t)
 		}
 	}
 	ccuMu.Unlock()
-	logger.Info("loadCcuHistory1m: restored %d samples (filtered from %d)", len(ccuHistory1m), len(stored.Values))
+	logger.Info("loadCcuHistory1m: restored %d samples (filtered from %d, deduped)", len(ccuHistory1m), len(stored.Values))
 }
 
 func chunkStorageKey(cx, cz int) string {
@@ -403,10 +435,11 @@ func (a *playerAOI) containsChunk(cx, cz int) bool {
 
 // playerPos はプレイヤーの最新位置（チャンク座標）
 type playerPos struct {
-	CX, CZ     int    // チャンク座標
-	X, Z       float64 // ワールド座標
-	RY         float64 // 回転
-	TextureUrl string // アバターテクスチャ
+	CX, CZ      int     // チャンク座標
+	X, Z        float64 // ワールド座標
+	RY          float64 // 回転
+	TextureUrl  string  // アバターテクスチャ
+	DisplayName string  // 表示名
 }
 
 // matchState はマッチの状態（プレイヤーごとのAOI管理）
@@ -510,11 +543,12 @@ func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *s
 				if nowVisible && !wasVisible {
 					// このプレイヤーが新しく見えるようになった → OP_AOI_ENTER を送信
 					enterData, _ := json.Marshal(map[string]interface{}{
-						"sessionId":  otherSID,
-						"x":          otherPos.X,
-						"z":          otherPos.Z,
-						"ry":         otherPos.RY,
-						"textureUrl": otherPos.TextureUrl,
+						"sessionId":   otherSID,
+						"x":           otherPos.X,
+						"z":           otherPos.Z,
+						"ry":          otherPos.RY,
+						"textureUrl":  otherPos.TextureUrl,
+						"displayName": otherPos.DisplayName,
 					})
 					dispatcher.BroadcastMessage(opAOIEnter, enterData, []runtime.Presence{senderPresence}, nil, true)
 				} else if wasVisible && !nowVisible {
@@ -599,7 +633,8 @@ func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *s
 									"x":          myPos.X,
 									"z":          myPos.Z,
 									"ry":         myPos.RY,
-									"textureUrl": myPos.TextureUrl,
+									"textureUrl":  myPos.TextureUrl,
+								"displayName": myPos.DisplayName,
 								})
 								dispatcher.BroadcastMessage(opAOIEnter, enterData, []runtime.Presence{otherP}, nil, true)
 							}
@@ -642,6 +677,21 @@ func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *s
 					dispatcher.BroadcastMessage(op, msg.GetData(), targets, msg, true)
 				}
 			}
+			continue
+		}
+
+		if op == opDisplayName {
+			// 表示名変更: {"displayName":...}
+			var dn struct {
+				DisplayName string `json:"displayName"`
+			}
+			if err := json.Unmarshal(msg.GetData(), &dn); err == nil {
+				if p, ok := ms.Positions[sid]; ok {
+					p.DisplayName = dn.DisplayName
+				}
+			}
+			// 表示名はユーザリスト全体に影響するため全員にブロードキャスト（AOIフィルタなし）
+			dispatcher.BroadcastMessage(op, msg.GetData(), nil, msg, true)
 			continue
 		}
 
@@ -770,7 +820,11 @@ func rpcGetPlayerCount(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 	count := getLatestCcu()
 	out := map[string]interface{}{"count": count}
 	if req.Range != "" {
-		out["history"] = getCcuHistoryRange(req.Range)
+		hr := getCcuHistoryRange(req.Range)
+		out["history"] = hr.Values
+		if hr.Timestamps != nil {
+			out["timestamps"] = hr.Timestamps
+		}
 	}
 
 	b, _ := json.Marshal(out)
@@ -1108,11 +1162,39 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 		return err
 	}
 
-	// ログイン検知（認証成功後）
+	// 表示名バリデーション（updateAccount のフック）
+	if err := initializer.RegisterBeforeUpdateAccount(func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in *api.UpdateAccountRequest) (*api.UpdateAccountRequest, error) {
+		if in.DisplayName != nil {
+			dn := in.DisplayName.Value
+			if strings.TrimSpace(dn) == "" {
+				return nil, runtime.NewError("display name must not be empty", 3) // INVALID_ARGUMENT
+			}
+			for _, r := range dn {
+				if unicode.IsControl(r) {
+					return nil, runtime.NewError("display name must not contain control characters", 3)
+				}
+			}
+		}
+		return in, nil
+	}); err != nil {
+		return err
+	}
+
+	// ログイン検知（カスタム認証 — 後方互換）
 	if err := initializer.RegisterAfterAuthenticateCustom(func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, out *api.Session, in *api.AuthenticateCustomRequest) error {
 		uid, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 		username, _ := ctx.Value(runtime.RUNTIME_CTX_USERNAME).(string)
-		logf("[login] uid=%s username=%s\n", uid, username)
+		logf("[login/custom] uid=%s username=%s\n", uid, username)
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// ログイン検知（デバイス認証）
+	if err := initializer.RegisterAfterAuthenticateDevice(func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, out *api.Session, in *api.AuthenticateDeviceRequest) error {
+		uid, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+		username, _ := ctx.Value(runtime.RUNTIME_CTX_USERNAME).(string)
+		logf("[login/device] uid=%s username=%s\n", uid, username)
 		return nil
 	}); err != nil {
 		return err

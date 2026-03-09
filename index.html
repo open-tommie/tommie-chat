@@ -26,12 +26,13 @@
             align-items: center;
             gap: 6px;
         }
-        #login-row label {
+        #login-row label, #displayname-row label {
             color: #fff;
             font-size: 12px;
             font-weight: bold;
             text-shadow: 0 1px 2px rgba(0,0,0,0.6);
             white-space: nowrap;
+            min-width: 3.5em;
         }
         #loginName {
             width: 160px;
@@ -155,6 +156,10 @@
             font-size: 11px;
             color: #000;
             max-width: 80px;
+            cursor: pointer;
+        }
+        #user-list tbody td.uuid-cell:hover {
+            background: rgba(100,149,237,0.15);
         }
         #user-list tbody td.ul-self {
             font-weight: bold;
@@ -1532,11 +1537,12 @@
             <table id="user-list">
                 <thead>
                     <tr>
-                        <th id="ul-th-user">Username</th>
-                        <th id="ul-th-uuid">UserID</th>
-                        <th id="ul-th-sid">SessionID</th>
-                        <th id="ul-th-rel">ログイン時間</th>
-                        <th id="ul-th-time">ログイン時刻</th>
+                        <th id="ul-th-user" title="ログインに使用する名前&#10;Nakamaサーバ上の username">ユーザID</th>
+                        <th id="ul-th-dname" title="アバターに表示される名前&#10;ログイン後に自由に変更可能">表示名</th>
+                        <th id="ul-th-uuid" title="Nakamaサーバが発行するアカウントの内部UUID&#10;アカウントごとに一意">アカウントID</th>
+                        <th id="ul-th-sid" title="接続ごとに発行されるセッションID&#10;ログインするたびに変わる">SessionID</th>
+                        <th id="ul-th-rel" title="ログインしてからの経過時間">ログイン時間</th>
+                        <th id="ul-th-time" title="ログインした日時（ISO 8601形式）">ログイン時刻</th>
                     </tr>
                 </thead>
                 <tbody id="user-list-body"></tbody>
@@ -1563,9 +1569,16 @@
     <div id="portrait-divider"><div id="portrait-divider-knob">⋯</div></div>
     <div id="chat-container">
         <div id="login-row">
-            <input id="loginName" type="text" placeholder="名前を入力" title="使える文字: 英数字 (a-z A-Z 0-9) と . _ @ + -&#10;例: tommie, user01, my.name&#10;6〜128文字">
+            <label for="loginName">ユーザID</label>
+            <input id="loginName" type="text" placeholder="名前を入力" title="ユーザID（デバイス認証）&#10;パスワード不要。同じユーザIDで再ログインできます&#10;使える文字: 英数字 (a-z A-Z 0-9) と . _ @ + -&#10;6〜128文字&#10;例: tommie, user01, my.name">
             <button id="loginBtn" class="ui-btn" style="width:auto;padding:0 12px;white-space:nowrap;background:#28a74580;">ログイン</button>
             <span id="loginStatus" style="color:#00dd55;font-size:11px;text-shadow:0 1px 2px rgba(0,0,0,0.3);"></span>
+        </div>
+        <div id="displayname-row" style="display:flex;align-items:center;gap:6px;padding:2px 4px;">
+            <label for="displayNameInput">表示名</label>
+            <input id="displayNameInput" type="text" placeholder="ログイン後に入力" disabled maxlength="10" size="10" style="width:10em;min-width:0;" title="アバターの表示名を設定します&#10;ログイン後に変更できます&#10;Enterまたは変更ボタンで設定&#10;1〜10文字（制御文字は使用不可）">
+            <button id="displayNameBtn" class="ui-btn" disabled style="width:auto;padding:0 8px;white-space:nowrap;font-size:12px;">変更</button>
+            <span id="displayNameStatus" style="font-size:11px;white-space:nowrap;"></span>
         </div>
         <div id="chat-row">
             <textarea id="chatInput" placeholder="セリフを入力" title="アバターのセリフを入力します&#10;Enter: 送信&#10;Shift+Enter: 改行&#10;縦方向にリサイズ可能（行単位）"></textarea>
