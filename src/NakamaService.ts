@@ -132,47 +132,45 @@ export class NakamaService {
     }
 
     async joinWorldMatch(): Promise<void> {
-        if (!this.session || !this.socket) return;
-        try {
-            const result = await this.client.rpc(this.session, "getWorldMatch", "" as unknown as object);
-            if (!result?.payload) return;
-            const raw = typeof result.payload === "string" ? result.payload : JSON.stringify(result.payload);
-            const data = JSON.parse(raw) as { matchId?: string };
-            if (!data.matchId) return;
-            this.matchId = data.matchId;
-            await this.socket.joinMatch(this.matchId);
-            this.socket.onmatchdata = (md: MatchData) => {
-                const sid = md.presence?.session_id;
-                try {
-                    const payload = JSON.parse(new TextDecoder().decode(md.data));
-                    if (md.op_code === OP_BLOCK_UPDATE) {
-                        const blk = payload as { gx: number; gz: number; blockId: number; r: number; g: number; b: number; a: number };
-                        this.onBlockUpdate?.(blk.gx, blk.gz, blk.blockId, blk.r ?? 255, blk.g ?? 255, blk.b ?? 255, blk.a ?? 255);
-                    } else if (md.op_code === OP_AOI_ENTER) {
-                        const e = payload as { sessionId: string; x: number; z: number; ry?: number; textureUrl?: string };
-                        console.log(`[recv:AOI_ENTER] sid=${e.sessionId} x=${e.x} z=${e.z} tex=${e.textureUrl ?? ""}`);
-                        this.onAOIEnter?.(e.sessionId, e.x, e.z, e.ry ?? 0, e.textureUrl ?? "");
-                    } else if (md.op_code === OP_AOI_LEAVE) {
-                        const e = payload as { sessionId: string };
-                        console.log(`[recv:AOI_LEAVE] sid=${e.sessionId}`);
-                        this.onAOILeave?.(e.sessionId);
-                    } else if (!sid) {
-                        return;
-                    } else if (md.op_code === OP_INIT_POS) {
-                        const pos = payload as { x: number; z: number; ry?: number };
-                        console.log(`[recv:INIT_POS] sid=${sid} x=${pos.x} z=${pos.z} ry=${pos.ry ?? 0}`);
-                        this.onAvatarInitPos?.(sid, pos.x, pos.z, pos.ry ?? 0);
-                    } else if (md.op_code === OP_MOVE_TARGET) {
-                        const pos = payload as { x: number; z: number };
-                        this.onAvatarMoveTarget?.(sid, pos.x, pos.z);
-                    } else if (md.op_code === OP_AVATAR_CHANGE) {
-                        const av = payload as { textureUrl: string };
-                        console.log(`[recv:AVATAR_CHANGE] sid=${sid} tex=${av.textureUrl}`);
-                        this.onAvatarChange?.(sid, av.textureUrl);
-                    }
-                } catch { /* ignore */ }
-            };
-        } catch { /* ignore */ }
+        if (!this.session || !this.socket) throw new Error("no session/socket");
+        const result = await this.client.rpc(this.session, "getWorldMatch", "" as unknown as object);
+        if (!result?.payload) throw new Error("getWorldMatch: no payload");
+        const raw = typeof result.payload === "string" ? result.payload : JSON.stringify(result.payload);
+        const data = JSON.parse(raw) as { matchId?: string };
+        if (!data.matchId) throw new Error("getWorldMatch: no matchId");
+        this.matchId = data.matchId;
+        await this.socket.joinMatch(this.matchId);
+        this.socket.onmatchdata = (md: MatchData) => {
+            const sid = md.presence?.session_id;
+            try {
+                const payload = JSON.parse(new TextDecoder().decode(md.data));
+                if (md.op_code === OP_BLOCK_UPDATE) {
+                    const blk = payload as { gx: number; gz: number; blockId: number; r: number; g: number; b: number; a: number };
+                    this.onBlockUpdate?.(blk.gx, blk.gz, blk.blockId, blk.r ?? 255, blk.g ?? 255, blk.b ?? 255, blk.a ?? 255);
+                } else if (md.op_code === OP_AOI_ENTER) {
+                    const e = payload as { sessionId: string; x: number; z: number; ry?: number; textureUrl?: string };
+                    console.log(`[recv:AOI_ENTER] sid=${e.sessionId} x=${e.x} z=${e.z} tex=${e.textureUrl ?? ""}`);
+                    this.onAOIEnter?.(e.sessionId, e.x, e.z, e.ry ?? 0, e.textureUrl ?? "");
+                } else if (md.op_code === OP_AOI_LEAVE) {
+                    const e = payload as { sessionId: string };
+                    console.log(`[recv:AOI_LEAVE] sid=${e.sessionId}`);
+                    this.onAOILeave?.(e.sessionId);
+                } else if (!sid) {
+                    return;
+                } else if (md.op_code === OP_INIT_POS) {
+                    const pos = payload as { x: number; z: number; ry?: number };
+                    console.log(`[recv:INIT_POS] sid=${sid} x=${pos.x} z=${pos.z} ry=${pos.ry ?? 0}`);
+                    this.onAvatarInitPos?.(sid, pos.x, pos.z, pos.ry ?? 0);
+                } else if (md.op_code === OP_MOVE_TARGET) {
+                    const pos = payload as { x: number; z: number };
+                    this.onAvatarMoveTarget?.(sid, pos.x, pos.z);
+                } else if (md.op_code === OP_AVATAR_CHANGE) {
+                    const av = payload as { textureUrl: string };
+                    console.log(`[recv:AVATAR_CHANGE] sid=${sid} tex=${av.textureUrl}`);
+                    this.onAvatarChange?.(sid, av.textureUrl);
+                }
+            } catch { /* ignore */ }
+        };
     }
 
     async sendInitPos(x: number, z: number, ry = 0): Promise<void> {
