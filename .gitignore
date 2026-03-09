@@ -45,9 +45,11 @@ nakama/log
 work/
 ss/
 .claude/
+01-README.md
 
-# --- Large Binary ---
+# --- Large Binary / Build Output ---
 pic1.png
+pic/ktx2_output/
 
 nakama/modules/world.so
 .claude/settings.json
