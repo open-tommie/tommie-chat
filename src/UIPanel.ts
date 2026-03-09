@@ -782,6 +782,8 @@ export function setupHtmlUI(game: GameScene): void {
             }
             if (loginNameInput) loginNameInput.onkeydown = null;
             startPing();
+            const ccuPanel = document.getElementById("ccu-panel");
+            if (ccuPanel && ccuPanel.style.display !== "none") startCcu();
         } catch (e) {
             let reason: string;
             if (e instanceof Error) {
@@ -1109,10 +1111,317 @@ export function setupHtmlUI(game: GameScene): void {
         }
     }
 
+    // ===== 同接数 (CCU) 計測 & グラフ =====
+    // レンジ設定: { サンプル数, ポーリング間隔ms, 1サンプルあたりの秒数 }
+    const CCU_RANGES: Record<string, { max: number; interval: number; secPerSample: number }> = {
+        "1m":  { max: 60,    interval: 5000,  secPerSample: 1 },
+        "5m":  { max: 300,   interval: 5000,  secPerSample: 1 },
+        "1h":  { max: 60,    interval: 60000, secPerSample: 60 },
+        "12h": { max: 720,   interval: 60000, secPerSample: 60 },
+        "1d":  { max: 1440,  interval: 60000, secPerSample: 60 },
+        "10d": { max: 14400, interval: 60000, secPerSample: 60 },
+    };
+    const CCU_DEFAULT_MAX  = 100;
+    const ccuHistory: number[] = [];
+    let ccuTimer: ReturnType<typeof setInterval> | null = null;
+    let ccuRange = "5m";
+    let ccuInitialized = false;
+
+    const getCcuConfig = () => CCU_RANGES[ccuRange] || CCU_RANGES["5m"];
+
+    const drawCcuGraph = () => {
+        const canvas = document.getElementById("ccu-canvas") as HTMLCanvasElement | null;
+        if (!canvas) return;
+        const cpanel  = document.getElementById("ccu-panel");
+        const cheader = document.getElementById("ccu-header");
+        if (!cpanel || !cheader) return;
+        const headerH = cheader.offsetHeight;
+        canvas.style.top = headerH + "px";
+        const w = cpanel.clientWidth, h = cpanel.clientHeight - headerH;
+        if (w <= 0 || h <= 0) return;
+        canvas.style.width  = w + "px";
+        canvas.style.height = h + "px";
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width  = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        const cfg = getCcuConfig();
+        const histMax = cfg.max;
+        const dark = isMobileDev;
+        const FONT_SIZE = dark ? 15 : 12;
+        const FONT_MONO = '"Courier New", Courier, monospace';
+        const FONT_STR  = `${FONT_SIZE}px ${FONT_MONO}`;
+        const FONT_BOLD = `bold ${FONT_SIZE}px ${FONT_MONO}`;
+        const AXIS_H = dark ? 26 : 16;
+        const gh     = h - AXIS_H;
+        ctx.clearRect(0, 0, w, h);
+
+        const validVals = ccuHistory.filter(v => v >= 0);
+        const maxVal = Math.max(CCU_DEFAULT_MAX, ...(validVals.length ? validVals : [0])) * 1.1;
+        const toY = (v: number) => gh - Math.min(v / maxVal, 1) * gh;
+
+        const gridMajor = dark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.20)";
+        const gridSub   = dark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.08)";
+        const labelCol  = dark ? "#eee" : "#000";
+
+        // 横グリッド（人数）
+        ctx.lineWidth = 1;
+        const gridStep = maxVal <= 50 ? 5 : maxVal <= 200 ? 10 : maxVal <= 500 ? 50 : 100;
+        const majorStep = gridStep * 5;
+        for (let v = gridStep; v < maxVal; v += gridStep) {
+            const yp = toY(v);
+            if (yp < 0) break;
+            const isMajor = v % majorStep === 0;
+            ctx.strokeStyle = isMajor ? gridMajor : gridSub;
+            ctx.setLineDash(isMajor ? [4, 3] : [2, 5]);
+            ctx.beginPath(); ctx.moveTo(0, yp); ctx.lineTo(w, yp); ctx.stroke();
+            if (isMajor) {
+                ctx.fillStyle = labelCol;
+                ctx.font = FONT_STR;
+                ctx.fillText(`${v}`, 2, yp - 2);
+            }
+        }
+        ctx.setLineDash([]);
+
+        // 縦グリッド（時間軸）
+        const step    = w / (histMax - 1);
+        const offsetX = (histMax - ccuHistory.length) * step;
+        // 時間ラベルの間隔を自動調整
+        const totalSec = histMax * cfg.secPerSample;
+        let tickStepSamples: number;
+        if (totalSec <= 120) tickStepSamples = Math.ceil(10 / cfg.secPerSample);        // 10秒刻み
+        else if (totalSec <= 600) tickStepSamples = Math.ceil(60 / cfg.secPerSample);    // 1分刻み
+        else if (totalSec <= 7200) tickStepSamples = Math.ceil(600 / cfg.secPerSample);  // 10分刻み
+        else if (totalSec <= 86400) tickStepSamples = Math.ceil(3600 / cfg.secPerSample);// 1時間刻み
+        else tickStepSamples = Math.ceil(86400 / cfg.secPerSample);                      // 1日刻み
+
+        const fmtTime = (sec: number): string => {
+            if (sec < 60) return `-${sec}s`;
+            if (sec < 3600) return `-${Math.floor(sec / 60)}m`;
+            if (sec < 86400) return `-${Math.floor(sec / 3600)}h`;
+            return `-${Math.floor(sec / 86400)}d`;
+        };
+
+        for (let n = tickStepSamples; n < histMax; n += tickStepSamples) {
+            const xp = Math.round((histMax - 1 - n) * step);
+            if (xp < 0 || xp > w) continue;
+            ctx.strokeStyle = dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.12)";
+            ctx.setLineDash([2, 4]);
+            ctx.beginPath(); ctx.moveTo(xp, 0); ctx.lineTo(xp, gh); ctx.stroke();
+            ctx.setLineDash([]);
+            const label = fmtTime(n * cfg.secPerSample);
+            ctx.fillStyle = labelCol;
+            ctx.font = FONT_STR;
+            const lw = ctx.measureText(label).width;
+            ctx.fillText(label, Math.max(0, Math.min(xp - lw / 2, w - lw)), h - 2);
+        }
+
+        // ベースライン
+        ctx.strokeStyle = gridMajor;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, gh); ctx.lineTo(w, gh); ctx.stroke();
+
+        if (ccuHistory.length === 0) return;
+
+        // エリア塗りつぶし + ライン描画
+        ctx.beginPath();
+        for (let i = 0; i < ccuHistory.length; i++) {
+            const x = offsetX + i * step, y = toY(Math.max(0, ccuHistory[i]));
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.lineTo(offsetX + (ccuHistory.length - 1) * step, gh);
+        ctx.lineTo(offsetX, gh);
+        ctx.closePath();
+        ctx.fillStyle = "rgba(80,140,255,0.18)";
+        ctx.fill();
+
+        ctx.beginPath();
+        for (let i = 0; i < ccuHistory.length; i++) {
+            const x = offsetX + i * step, y = toY(Math.max(0, ccuHistory[i]));
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = "rgba(80,140,255,0.85)";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        // 統計ボックス (now / avg / min / max) + ログイン状態
+        const latest = ccuHistory[ccuHistory.length - 1];
+        const loggedIn = ccuInitialized && latest !== undefined && latest >= 0;
+        const hasData = validVals.length > 0;
+        const minV = hasData ? Math.min(...validVals) : undefined;
+        const maxV = hasData ? Math.max(...validVals) : undefined;
+        const avgV = hasData ? Math.round(validVals.reduce((a, b) => a + b, 0) / validVals.length) : undefined;
+        ctx.font = FONT_BOLD;
+        const avgBg = dark ? "rgba(0,0,0,0.5)" : "rgba(255,255,255,0.65)";
+        const fmtVal = (v: number | undefined) => v !== undefined ? `${v}` : "";
+        const rows = [
+            { label: "now", value: fmtVal(loggedIn ? latest : undefined) },
+            { label: "avg", value: fmtVal(avgV) },
+            { label: "min", value: fmtVal(minV) },
+            { label: "max", value: fmtVal(maxV) },
+        ];
+        const lineH = FONT_SIZE + 2;
+        const pad = 4;
+        const labelW = Math.max(...rows.map(r => ctx.measureText(r.label).width));
+        const valW = Math.max(...rows.map(r => ctx.measureText(r.value || "  ").width));
+        const boxW = labelW + valW + pad * 3;
+        const boxH = lineH * rows.length + pad * 2;
+        const boxX = w - boxW - 4;
+        const boxY = 3;
+        ctx.fillStyle = avgBg;
+        ctx.fillRect(boxX, boxY, boxW, boxH);
+        ctx.fillStyle = dark ? "#eee" : "#000";
+        for (let li = 0; li < rows.length; li++) {
+            const y = boxY + pad + FONT_SIZE + li * lineH;
+            ctx.fillText(rows[li].label, boxX + pad, y);
+            const vw = ctx.measureText(rows[li].value).width;
+            ctx.fillText(rows[li].value, boxX + boxW - pad - vw, y);
+        }
+    };
+
+    const startCcu = () => {
+        if (ccuTimer !== null) return;
+        const cfg = getCcuConfig();
+        const tick = async () => {
+            const needHistory = !ccuInitialized;
+            const result = await game.nakama.getPlayerCount(needHistory ? ccuRange : undefined);
+            if (result === null) {
+                ccuHistory.push(-1);
+            } else if (needHistory) {
+                ccuInitialized = true;
+                ccuHistory.length = 0;
+                for (const v of result.history) ccuHistory.push(v);
+                if (ccuHistory.length === 0 || ccuHistory[ccuHistory.length - 1] !== result.count) {
+                    ccuHistory.push(result.count);
+                }
+            } else {
+                ccuHistory.push(result.count);
+            }
+            const maxLen = getCcuConfig().max;
+            if (ccuHistory.length > maxLen) ccuHistory.splice(0, ccuHistory.length - maxLen);
+            drawCcuGraph();
+        };
+        tick();
+        ccuTimer = setInterval(tick, cfg.interval);
+    };
+
+    const stopCcu = () => {
+        if (ccuTimer !== null) { clearInterval(ccuTimer); ccuTimer = null; }
+        ccuHistory.length = 0;
+        ccuInitialized = false;
+        drawCcuGraph();
+    };
+
+    const restartCcu = () => {
+        stopCcu();
+        const cpanel = document.getElementById("ccu-panel");
+        if (cpanel && cpanel.style.display !== "none") startCcu();
+    };
+
+    // レンジ変更ハンドラ
+    const ccuRangeSelect = document.getElementById("ccu-range") as HTMLSelectElement | null;
+    if (ccuRangeSelect) {
+        ccuRangeSelect.addEventListener("change", () => {
+            ccuRange = ccuRangeSelect.value;
+            restartCcu();
+        });
+    }
+
+    // ===== CCU パネル ドラッグ & クローズ =====
+    {
+        const cpanel  = document.getElementById("ccu-panel")  as HTMLElement;
+        const cheader = document.getElementById("ccu-header") as HTMLElement;
+        const cclose  = document.getElementById("ccu-close")  as HTMLElement;
+
+        if (cpanel && cheader) {
+            const sCkC = (k: string, v: string) =>
+                document.cookie = `${k}=${encodeURIComponent(v)};path=/;max-age=${60*60*24*365}`;
+            const gCkC = (k: string): string | null => {
+                const m = document.cookie.match(new RegExp("(?:^|; )" + k + "=([^;]*)"));
+                return m ? decodeURIComponent(m[1]) : null;
+            };
+
+            if (!isMobileDev) {
+                const initRect = cpanel.getBoundingClientRect();
+                cpanel.style.left  = initRect.left + "px";
+                cpanel.style.right = "auto";
+            }
+            if (!isMobileDev) {
+                const savedL = gCkC("ccuLeft"), savedT = gCkC("ccuTop");
+                const savedW = gCkC("ccuWidth"), savedH = gCkC("ccuHeight");
+                if (savedL !== null) { cpanel.style.left = savedL + "px"; cpanel.style.right = "auto"; }
+                if (savedT !== null) cpanel.style.top    = savedT + "px";
+                if (savedW !== null) cpanel.style.width  = savedW + "px";
+                if (savedH !== null) cpanel.style.height = savedH + "px";
+                game.clampToViewport(cpanel);
+            }
+
+            let isDragC = false, offXC = 0, offYC = 0;
+            cheader.addEventListener("pointerdown", (e: PointerEvent) => {
+                if ((e.target as HTMLElement).id === "ccu-close") return;
+                if ((e.target as HTMLElement).tagName === "SELECT") return;
+                if (isMobileLandscape()) return;
+                isDragC = true;
+                offXC = e.clientX - cpanel.getBoundingClientRect().left;
+                offYC = e.clientY - cpanel.getBoundingClientRect().top;
+                cheader.setPointerCapture(e.pointerId);
+                e.preventDefault();
+            });
+            document.addEventListener("pointermove", (e: PointerEvent) => {
+                if (!isDragC) return;
+                cpanel.style.left = Math.max(0, e.clientX - offXC) + "px";
+                cpanel.style.top  = Math.max(0, e.clientY - offYC) + "px";
+            });
+            document.addEventListener("pointerup", () => {
+                if (!isDragC) return;
+                isDragC = false;
+                const r = cpanel.getBoundingClientRect();
+                sCkC("ccuLeft", String(Math.round(r.left)));
+                sCkC("ccuTop",  String(Math.round(r.top)));
+                drawCcuGraph();
+            });
+
+            new ResizeObserver(() => {
+                const r = cpanel.getBoundingClientRect();
+                sCkC("ccuWidth",  String(Math.round(r.width)));
+                sCkC("ccuHeight", String(Math.round(r.height)));
+                drawCcuGraph();
+            }).observe(cpanel);
+            const ccuCanvas = document.getElementById("ccu-canvas");
+            if (ccuCanvas) {
+                new ResizeObserver(() => drawCcuGraph()).observe(ccuCanvas);
+            }
+
+            if (cclose) {
+                cclose.addEventListener("click", () => {
+                    cpanel.style.display = "none";
+                    sCkC("showCcu", "0");
+                    const mb = document.getElementById("menu-ccu");
+                    if (mb) mb.textContent = "　 同接グラフ";
+                    stopCcu();
+                });
+            }
+
+            // パネル表示時にCCU計測開始
+            const ccuObserver = new MutationObserver(() => {
+                if (cpanel.style.display !== "none") {
+                    startCcu();
+                } else {
+                    stopCcu();
+                }
+            });
+            ccuObserver.observe(cpanel, { attributes: true, attributeFilter: ["style"] });
+        }
+    }
+
     const doLogout = () => {
         const host = srvUrlInput?.value.trim()  || "127.0.0.1";
         const port = srvPortInput?.value.trim() || "7350";
         stopPing();
+        stopCcu();
         game.saveChunksToDB();
         game.nakama.logout();
         game.currentUserId = null;

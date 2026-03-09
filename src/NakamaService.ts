@@ -288,6 +288,21 @@ export class NakamaService {
         }
     }
 
+    // サーバの同接数を取得する（range指定で履歴も取得）
+    async getPlayerCount(range?: string): Promise<{ count: number; history: number[] } | null> {
+        if (!this.session) return null;
+        try {
+            const payload = range ? { range } : {};
+            const result = await this.client.rpc(this.session, "getPlayerCount", payload as unknown as object);
+            if (!result?.payload) return null;
+            const raw = typeof result.payload === "string" ? result.payload : JSON.stringify(result.payload);
+            const data = JSON.parse(raw) as { count?: number; history?: number[] };
+            return { count: data.count ?? 0, history: data.history ?? [] };
+        } catch {
+            return null;
+        }
+    }
+
     // 全プレイヤーのAOI情報を取得
     async getPlayersAOI(): Promise<{ sessionId: string; username: string; minCX: number; minCZ: number; maxCX: number; maxCZ: number; x: number; z: number }[]> {
         if (!this.session) return [];

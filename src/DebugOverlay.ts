@@ -320,6 +320,7 @@ export function setupDebugOverlay(game: GameScene): void {
         makeToggle("menu-userlist",       "user-list-panel",       "ユーザリスト",  "showUserList");
         makeToggle("menu-chathistory",    "chat-history-panel",    "チャット履歴",  "showChatHist");
         makeToggle("menu-ping",           "ping-panel",            "Ping グラフ",   "showPing");
+        makeToggle("menu-ccu",            "ccu-panel",             "同接グラフ",    "showCcu");
         makeToggle("menu-debug",          "debug-overlay",         "デバッグツール", "showDebug");
         updateMobileLayout();
         window.addEventListener("orientationchange", () => setTimeout(updateMobileLayout, 200));
@@ -760,13 +761,13 @@ export function setupDebugOverlay(game: GameScene): void {
         const pd = document.getElementById("ping-display");
         if (pd) {
             if (game.latestPingAvg !== null && game.latestPingAvg < 0) {
-                pd.textContent = `回線切断中 FPS=${fps}`;
+                pd.innerHTML = `<span style="color:rgba(220,80,80,0.6)">未接続</span> 回線切断中 FPS=${fps}`;
                 pd.style.color = "#ff4444";
             } else if (game.latestPingAvg !== null) {
-                pd.textContent = `ping=${game.latestPingAvg}ms FPS=${fps}`;
+                pd.innerHTML = `<span style="color:rgba(80,180,80,0.6)">ログイン中</span> ping=${game.latestPingAvg}ms FPS=${fps}`;
                 pd.style.color = "";
             } else {
-                pd.textContent = `ログアウト中 FPS=${fps}`;
+                pd.innerHTML = `<span style="color:rgba(220,80,80,0.6)">未接続</span> ping=--ms FPS=${fps}`;
                 pd.style.color = "";
             }
         }

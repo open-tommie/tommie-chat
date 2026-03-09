@@ -104,11 +104,189 @@ func (ch *chunk) fromFlat(flat []uint8) bool {
 // 地面テーブル: 16x16 チャンクの配列
 var chunks [chunkCount][chunkCount]chunk
 
+// 同接数履歴（2層）
+// 1秒間隔: 最大300サンプル（5分間）
+// 1分間隔: 最大14400サンプル（10日間）
+const (
+	ccu1sMax        = 300   // 5分 × 60秒
+	ccu1mMax        = 14400 // 10日 × 24時間 × 60分
+	ccuSampleTicks  = 10    // 10tick/s × 1s = 10
+	ccuMinuteTicks  = 600   // 10tick/s × 60s = 600
+)
+
+var (
+	ccuMu          sync.Mutex
+	ccuHistory1s   []int   // 1秒間隔サンプル
+	ccuHistory1m   []int   // 1分間隔サンプル（1分間の平均値）
+	ccuHistory1mTs []int64 // 1分間隔サンプルのUnix秒タイムスタンプ
+	ccu1sAccum     []int   // 1分間の1sサンプル蓄積（平均計算用）
+)
+
+func appendCcu1sSample(count int) {
+	ccuMu.Lock()
+	ccuHistory1s = append(ccuHistory1s, count)
+	if len(ccuHistory1s) > ccu1sMax {
+		ccuHistory1s = ccuHistory1s[len(ccuHistory1s)-ccu1sMax:]
+	}
+	ccu1sAccum = append(ccu1sAccum, count)
+	ccuMu.Unlock()
+}
+
+func flushCcu1mSample() {
+	ccuMu.Lock()
+	if len(ccu1sAccum) > 0 {
+		sum := 0
+		for _, v := range ccu1sAccum {
+			sum += v
+		}
+		avg := sum / len(ccu1sAccum)
+		ccuHistory1m = append(ccuHistory1m, avg)
+		ccuHistory1mTs = append(ccuHistory1mTs, time.Now().Unix())
+		if len(ccuHistory1m) > ccu1mMax {
+			ccuHistory1m = ccuHistory1m[len(ccuHistory1m)-ccu1mMax:]
+			ccuHistory1mTs = ccuHistory1mTs[len(ccuHistory1mTs)-ccu1mMax:]
+		}
+		ccu1sAccum = ccu1sAccum[:0]
+	}
+	ccuMu.Unlock()
+}
+
+// getCcuHistoryRange は指定レンジの履歴を返す
+// "1m"=直近60件(1s), "5m"=直近300件(1s), "1h"=直近60件(1m),
+// "12h"=直近720件(1m), "1d"=直近1440件(1m), "10d"=全件(1m)
+func getCcuHistoryRange(rangeStr string) []int {
+	ccuMu.Lock()
+	defer ccuMu.Unlock()
+
+	var src []int
+	var n int
+	switch rangeStr {
+	case "1m":
+		src = ccuHistory1s
+		n = 60
+	case "5m":
+		src = ccuHistory1s
+		n = 300
+	case "1h":
+		src = ccuHistory1m
+		n = 60
+	case "12h":
+		src = ccuHistory1m
+		n = 720
+	case "1d":
+		src = ccuHistory1m
+		n = 1440
+	case "10d":
+		src = ccuHistory1m
+		n = 14400
+	default:
+		src = ccuHistory1s
+		n = 300
+	}
+
+	if n > len(src) {
+		n = len(src)
+	}
+	out := make([]int, n)
+	copy(out, src[len(src)-n:])
+	return out
+}
+
+func getLatestCcu() int {
+	ccuMu.Lock()
+	defer ccuMu.Unlock()
+	if len(ccuHistory1s) > 0 {
+		return ccuHistory1s[len(ccuHistory1s)-1]
+	}
+	return 0
+}
+
 // ストレージキー
 const (
 	groundCollection = "world_data"
+	ccuCollection    = "ccu_data"
+	ccuStorageKey    = "history_1m"
 	systemUserID     = "00000000-0000-0000-0000-000000000000"
 )
+
+// saveCcuHistory1m は1分間隔の同接履歴をDBに保存する
+func saveCcuHistory1m(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger) {
+	ccuMu.Lock()
+	n := len(ccuHistory1m)
+	if n == 0 {
+		ccuMu.Unlock()
+		return
+	}
+	// タイムスタンプ配列と値配列の長さを揃える
+	if len(ccuHistory1mTs) != n {
+		ccuMu.Unlock()
+		logger.Warn("saveCcuHistory1m: length mismatch ts=%d vals=%d", len(ccuHistory1mTs), n)
+		return
+	}
+	ts := make([]int64, n)
+	vals := make([]int, n)
+	copy(ts, ccuHistory1mTs)
+	copy(vals, ccuHistory1m)
+	ccuMu.Unlock()
+
+	data, err := json.Marshal(struct {
+		Timestamps []int64 `json:"timestamps"`
+		Values     []int   `json:"values"`
+	}{Timestamps: ts, Values: vals})
+	if err != nil {
+		logger.Warn("saveCcuHistory1m marshal: %v", err)
+		return
+	}
+	if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
+		Collection:      ccuCollection,
+		Key:             ccuStorageKey,
+		UserID:          systemUserID,
+		Value:           string(data),
+		PermissionRead:  0,
+		PermissionWrite: 0,
+	}}); err != nil {
+		logger.Warn("saveCcuHistory1m StorageWrite: %v", err)
+		return
+	}
+	logger.Info("saveCcuHistory1m: saved %d samples", n)
+}
+
+// loadCcuHistory1m はDBから1分間隔の同接履歴を復元する（過去10日分のみ）
+func loadCcuHistory1m(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger) {
+	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{{
+		Collection: ccuCollection,
+		Key:        ccuStorageKey,
+		UserID:     systemUserID,
+	}})
+	if err != nil || len(objs) == 0 {
+		return
+	}
+	var stored struct {
+		Timestamps []int64 `json:"timestamps"`
+		Values     []int   `json:"values"`
+	}
+	if err := json.Unmarshal([]byte(objs[0].Value), &stored); err != nil {
+		logger.Warn("loadCcuHistory1m unmarshal: %v", err)
+		return
+	}
+	if len(stored.Timestamps) != len(stored.Values) {
+		logger.Warn("loadCcuHistory1m: length mismatch ts=%d vals=%d", len(stored.Timestamps), len(stored.Values))
+		return
+	}
+	// 過去10日分のみフィルタ
+	cutoff := time.Now().Unix() - int64(10*24*60*60)
+	ccuMu.Lock()
+	ccuHistory1m = ccuHistory1m[:0]
+	ccuHistory1mTs = ccuHistory1mTs[:0]
+	for i, t := range stored.Timestamps {
+		if t >= cutoff {
+			ccuHistory1m = append(ccuHistory1m, stored.Values[i])
+			ccuHistory1mTs = append(ccuHistory1mTs, t)
+		}
+	}
+	ccuMu.Unlock()
+	logger.Info("loadCcuHistory1m: restored %d samples (filtered from %d)", len(ccuHistory1m), len(stored.Values))
+}
 
 func chunkStorageKey(cx, cz int) string {
 	return fmt.Sprintf("chunk_%d_%d", cx, cz)
@@ -472,10 +650,23 @@ func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *s
 			logger.Warn("BroadcastMessage error: %v", err)
 		}
 	}
+
+	// 同接数サンプリング（1秒ごと）
+	if tick%ccuSampleTicks == 0 {
+		appendCcu1sSample(len(ms.Presences))
+	}
+	// 1分ごとに1m履歴へフラッシュ
+	if tick%ccuMinuteTicks == 0 {
+		flushCcu1mSample()
+	}
+
 	return ms
 }
 
 func (m *worldMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, graceSeconds int) interface{} {
+	// シャットダウン時: 未フラッシュの1sデータを1mに追加してからDB保存
+	flushCcu1mSample()
+	saveCcuHistory1m(ctx, nk, logger)
 	return state
 }
 
@@ -561,8 +752,27 @@ func (m *worldMatch) handleGetPlayersAOI(ms *matchState, data string) (interface
 
 // rpcPing はクライアントのラウンドトリップ時間計測用 RPC
 func rpcPing(_ context.Context, _ runtime.Logger, _ *sql.DB, _ runtime.NakamaModule, _ string) (string, error) {
-	fmt.Println("[ping]")
 	return "{}", nil
+}
+
+// rpcGetPlayerCount は現在の同接数を返す RPC
+// payload: {"range":"5m"} で履歴も返す。range省略時は count のみ。
+func rpcGetPlayerCount(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	var req struct {
+		Range string `json:"range"`
+	}
+	if payload != "" {
+		json.Unmarshal([]byte(payload), &req)
+	}
+
+	count := getLatestCcu()
+	out := map[string]interface{}{"count": count}
+	if req.Range != "" {
+		out["history"] = getCcuHistoryRange(req.Range)
+	}
+
+	b, _ := json.Marshal(out)
+	return string(b), nil
 }
 
 // rpcGetPlayersAOI は全プレイヤーのAOI情報を返す（MatchSignal経由）
@@ -696,7 +906,7 @@ func rpcGetGroundChunk(_ context.Context, _ runtime.Logger, _ *sql.DB, _ runtime
 
 // rpcGetGroundTable は廃止（ワールドが1024x1024になり全チャンク一括返却は非現実的）
 func rpcGetGroundTable(_ context.Context, _ runtime.Logger, _ *sql.DB, _ runtime.NakamaModule, _ string) (string, error) {
-	fmt.Println("[getGroundTable] deprecated — use syncChunks")
+	// deprecated: use syncChunks
 	return `{"error":"deprecated: use syncChunks with AOI range"}`, nil
 }
 
@@ -860,6 +1070,9 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 		logger.Info("ground_table loaded: %d chunks", loadedChunks)
 	}
 
+	// 同接履歴をDBから復元（過去10日分）
+	loadCcuHistory1m(ctx, nk, logger)
+
 	if err := initializer.RegisterMatch("world", func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) (runtime.Match, error) {
 		return &worldMatch{}, nil
 	}); err != nil {
@@ -887,6 +1100,9 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 		return err
 	}
 	if err := initializer.RegisterRpc("getPlayersAOI", rpcGetPlayersAOI); err != nil {
+		return err
+	}
+	if err := initializer.RegisterRpc("getPlayerCount", rpcGetPlayerCount); err != nil {
 		return err
 	}
 

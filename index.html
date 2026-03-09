@@ -592,6 +592,59 @@
             background: transparent;
         }
 
+        /* ===== 同接グラフパネル ===== */
+        #ccu-panel {
+            position: fixed;
+            top: 15px;
+            right: 610px;
+            width: 300px;
+            height: 160px;
+            min-width: 180px;
+            min-height: 80px;
+            background: rgba(255,255,255,0.35);
+            backdrop-filter: blur(2px);
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.12);
+            z-index: 100;
+            overflow: hidden;
+            resize: both;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 12px;
+            color: #000;
+        }
+        #ccu-header {
+            padding: 4px 8px;
+            font-weight: bold;
+            font-size: 13px;
+            color: #000;
+            border-bottom: 1px solid rgba(0,0,0,0.15);
+            background: rgba(255,255,255,0.4);
+            cursor: grab;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+            touch-action: none;
+            flex-shrink: 0;
+        }
+        #ccu-header:active { cursor: grabbing; }
+        #ccu-close {
+            cursor: pointer;
+            font-size: 11px;
+            line-height: 1;
+            opacity: 0.6;
+            padding: 4px 6px;
+        }
+        #ccu-close:hover { opacity: 1; }
+        #ccu-canvas {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: block;
+            background: transparent;
+        }
+
         /* ===== ハンバーガーメニュー ===== */
         #menu-btn {
             position: fixed;
@@ -1500,6 +1553,7 @@
         <button class="menu-item" id="menu-userlist">✓ ユーザリスト</button>
         <button class="menu-item" id="menu-chathistory">✓ チャット履歴</button>
         <button class="menu-item" id="menu-ping">✓ Ping グラフ</button>
+        <button class="menu-item" id="menu-ccu">　 同接グラフ</button>
         <button class="menu-item" id="menu-debug">✓ デバッグツール</button>
         <hr style="margin:4px 0;border-color:rgba(255,255,255,0.2);">
         <button class="menu-item" id="menu-cookie-reset">全パネル非表示（クッキー初期化）</button>
@@ -1529,6 +1583,22 @@
             <span id="ping-close">❌️</span>
         </div>
         <canvas id="ping-canvas"></canvas>
+    </div>
+
+    <div id="ccu-panel" style="display:none;">
+        <div id="ccu-header">
+            <span>同接グラフ</span>
+            <select id="ccu-range" style="font-size:11px;font-family:monospace;border:1px solid rgba(0,0,0,0.2);border-radius:3px;background:rgba(255,255,255,0.5);padding:1px 2px;cursor:pointer;">
+                <option value="1m">1分</option>
+                <option value="5m" selected>5分</option>
+                <option value="1h">1時間</option>
+                <option value="12h">12時間</option>
+                <option value="1d">1日</option>
+                <option value="10d">10日</option>
+            </select>
+            <span id="ccu-close">❌️</span>
+        </div>
+        <canvas id="ccu-canvas"></canvas>
     </div>
 
     <div id="app-footer-version" style="position:fixed;bottom:4px;right:8px;font-size:10px;font-family:monospace;text-align:right;opacity:0.85;pointer-events:none;z-index:1;line-height:1.5;"></div>
