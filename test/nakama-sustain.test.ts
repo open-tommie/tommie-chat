@@ -1,0 +1,301 @@
+/**
+ * Nakama 同時接続維持テスト
+ *
+ * 100人が同時接続した状態を一定時間維持し、
+ * 定期的に移動メッセージを送信して正常性を確認する。
+ * 切断時は自動リコネクトする。
+ *
+ * 前提: nakama サーバが 127.0.0.1:7350 で起動していること
+ *   cd nakama && docker compose up -d
+ *
+ * 実行: npx vitest run test/nakama-sustain.test.ts
+ */
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import * as ws from 'ws';
+(globalThis as unknown as Record<string, unknown>).WebSocket = ws.WebSocket;
+import { Client, Session, Socket } from '@heroiclabs/nakama-js';
+
+const HOST = '127.0.0.1';
+const PORT = '7350';
+const SERVER_KEY = 'defaultkey';
+const OP_INIT_POS = 1;
+const OP_MOVE_TARGET = 2;
+const OP_AOI_UPDATE = 5;
+const PLAYER_COUNT = parseInt(process.env.SUSTAIN_PLAYER_COUNT ?? '100', 10);
+
+interface PlayerConn {
+    client: Client;
+    session: Session;
+    socket: Socket;
+    matchId: string;
+    sessionId: string;
+    name: string;
+    connected: boolean;
+    reconnecting: boolean;
+    reconnectCount: number;
+}
+
+let totalReconnects = 0;
+let globalPlayers: PlayerConn[] = [];
+
+// Ctrl+C で強制終了された場合、全プレイヤーをクリーンに切断してから終了する
+process.on('SIGINT', () => {
+    console.log(`\n  SIGINT: ${globalPlayers.length}人を切断中...`);
+    for (const p of globalPlayers) {
+        try { p.socket.disconnect(true); } catch { /* ignore */ }
+    }
+    console.log('  切断完了');
+    setTimeout(() => process.exit(1), 500);
+});
+
+// ── ヘルパー ──
+
+async function connectSocket(p: PlayerConn): Promise<void> {
+    const socket = p.client.createSocket(false, false);
+    socket.setHeartbeatTimeoutMs(60000);
+    await socket.connect(p.session, true);
+
+    const match = await socket.joinMatch(p.matchId);
+    p.socket = socket;
+    p.sessionId = match.self?.session_id ?? '';
+    p.connected = true;
+
+    // 切断検知ハンドラを設定
+    socket.ondisconnect = () => {
+        p.connected = false;
+    };
+}
+
+async function createPlayer(name: string): Promise<PlayerConn> {
+    const client = new Client(SERVER_KEY, HOST, PORT, false);
+    const session = await client.authenticateCustom(name, true, name);
+    const socket = client.createSocket(false, false);
+    socket.setHeartbeatTimeoutMs(60000);
+    await socket.connect(session, true);
+
+    const result = await client.rpc(session, 'getWorldMatch', '' as unknown as object);
+    const raw = typeof result.payload === 'string' ? result.payload : JSON.stringify(result.payload);
+    const data = JSON.parse(raw) as { matchId?: string };
+    if (!data.matchId) throw new Error(`getWorldMatch failed for ${name}`);
+
+    const match = await socket.joinMatch(data.matchId);
+    const sessionId = match.self?.session_id ?? '';
+
+    const p: PlayerConn = {
+        client, session, socket, matchId: data.matchId, sessionId, name,
+        connected: true, reconnecting: false, reconnectCount: 0,
+    };
+
+    // 切断検知ハンドラを設定
+    socket.ondisconnect = () => {
+        p.connected = false;
+    };
+
+    return p;
+}
+
+async function reconnectPlayer(p: PlayerConn): Promise<boolean> {
+    if (p.reconnecting) return false;
+    p.reconnecting = true;
+    try {
+        await connectSocket(p);
+        p.reconnectCount++;
+        totalReconnects++;
+        return true;
+    } catch {
+        p.connected = false;
+        return false;
+    } finally {
+        p.reconnecting = false;
+    }
+}
+
+/**
+ * 切断されたプレイヤーをバッチでリコネクトする
+ */
+async function reconnectDisconnected(players: PlayerConn[], concurrency = 20): Promise<number> {
+    const disconnected = players.filter(p => !p.connected && !p.reconnecting);
+    if (disconnected.length === 0) return 0;
+
+    let reconnected = 0;
+    for (let offset = 0; offset < disconnected.length; offset += concurrency) {
+        const batch = disconnected.slice(offset, offset + concurrency);
+        const results = await Promise.allSettled(batch.map(p => reconnectPlayer(p)));
+        for (const r of results) {
+            if (r.status === 'fulfilled' && r.value) reconnected++;
+        }
+    }
+    return reconnected;
+}
+
+function cleanup(p: PlayerConn): void {
+    try { p.socket.disconnect(true); } catch { /* ignore */ }
+    p.connected = false;
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise(r => setTimeout(r, ms));
+}
+
+async function createPlayers(prefix: string, count: number, concurrency = 50): Promise<PlayerConn[]> {
+    const players: PlayerConn[] = [];
+    for (let offset = 0; offset < count; offset += concurrency) {
+        const batch = Math.min(concurrency, count - offset);
+        const promises: Promise<PlayerConn>[] = [];
+        for (let i = 0; i < batch; i++) {
+            promises.push(createPlayer(`${prefix}_${offset + i}`));
+        }
+        players.push(...await Promise.all(promises));
+    }
+    return players;
+}
+
+function cleanupAll(players: PlayerConn[]): void {
+    for (const p of players) cleanup(p);
+}
+
+async function batchSend(
+    players: PlayerConn[],
+    buildPayload: (p: PlayerConn, i: number) => { opCode: number; data: string },
+    batchSize = 50
+): Promise<{ sent: number; errors: number }> {
+    let sent = 0, errors = 0;
+    for (let offset = 0; offset < players.length; offset += batchSize) {
+        const batch = players.slice(offset, offset + batchSize);
+        const results = await Promise.allSettled(
+            batch.map((p, bi) => {
+                if (!p.connected) return Promise.reject(new Error('disconnected'));
+                const { opCode, data } = buildPayload(p, offset + bi);
+                return p.socket.sendMatchState(p.matchId, opCode, data);
+            })
+        );
+        for (const r of results) {
+            if (r.status === 'fulfilled') sent++;
+            else errors++;
+        }
+    }
+    return { sent, errors };
+}
+
+function fmtDuration(sec: number): string {
+    if (sec >= 60) return `${Math.floor(sec / 60)}分${sec % 60 ? sec % 60 + '秒' : ''}`;
+    return `${sec}秒`;
+}
+
+/**
+ * 一定時間接続を維持しながら定期的に移動メッセージを送信し、正常性を確認する。
+ * 3秒ごとに全員がMOVE_TARGETを送信。切断プレイヤーは自動リコネクトする。
+ */
+async function sustainTest(
+    players: PlayerConn[],
+    durationSec: number
+): Promise<{
+    rounds: number; totalSent: number; totalErrors: number; totalReconnects: number;
+    roundResults: { elapsed: number; sent: number; errors: number; reconnected: number; connected: number }[];
+}> {
+    const INTERVAL_MS = 3000;
+    const rounds = Math.max(1, Math.floor((durationSec * 1000) / INTERVAL_MS));
+    let totalSent = 0, totalErrors = 0, testReconnects = 0;
+    const roundResults: { elapsed: number; sent: number; errors: number; reconnected: number; connected: number }[] = [];
+
+    for (let round = 0; round < rounds; round++) {
+        const t0 = performance.now();
+
+        // 切断されたプレイヤーをリコネクト
+        const reconnected = await reconnectDisconnected(players);
+        testReconnects += reconnected;
+
+        const connectedCount = players.filter(p => p.connected).length;
+
+        // 全員がランダム方向に移動
+        const result = await batchSend(players, (_p, i) => {
+            const baseX = (i % 100) * 2 - 100;
+            const baseZ = Math.floor(i / 100) * 2 - 10;
+            const dx = (Math.random() - 0.5) * 10;
+            const dz = (Math.random() - 0.5) * 10;
+            return {
+                opCode: OP_MOVE_TARGET,
+                data: JSON.stringify({ x: baseX + dx, z: baseZ + dz }),
+            };
+        });
+
+        totalSent += result.sent;
+        totalErrors += result.errors;
+        const elapsed = performance.now() - t0;
+        roundResults.push({ elapsed, sent: result.sent, errors: result.errors, reconnected, connected: connectedCount });
+
+        // 次のラウンドまで待つ（送信時間分を差し引く）
+        const waitMs = INTERVAL_MS - elapsed;
+        if (waitMs > 0 && round < rounds - 1) {
+            await sleep(waitMs);
+        }
+    }
+
+    return { rounds, totalSent, totalErrors, totalReconnects: testReconnects, roundResults };
+}
+
+// ── テスト ──
+
+const DURATIONS_SEC = [1, 10, 30, 60];
+
+describe(`接続維持テスト (${PLAYER_COUNT}人)`, { timeout: 300_000 }, () => {
+    let players: PlayerConn[] = [];
+
+    beforeAll(async () => {
+        totalReconnects = 0;
+        players = await createPlayers('sustain', PLAYER_COUNT);
+        globalPlayers = players;
+        await sleep(200);
+
+        // 全員の初期位置とAOIを設定
+        await batchSend(players, (_p, i) => {
+            const x = (i % 100) * 2 - 100;
+            const z = Math.floor(i / 100) * 2 - 10;
+            return { opCode: OP_INIT_POS, data: JSON.stringify({ x, z, ry: 0 }) };
+        });
+        await batchSend(players, (_p, i) => {
+            const x = (i % 100) * 2 - 100;
+            const z = Math.floor(i / 100) * 2 - 10;
+            const half = 512;
+            const cx = Math.floor((x + half) / 16);
+            const cz = Math.floor((z + half) / 16);
+            return {
+                opCode: OP_AOI_UPDATE,
+                data: JSON.stringify({
+                    minCX: Math.max(0, cx - 3), minCZ: Math.max(0, cz - 3),
+                    maxCX: Math.min(63, cx + 3), maxCZ: Math.min(63, cz + 3),
+                }),
+            };
+        });
+        await sleep(300);
+
+        console.log(`  セットアップ完了: ${players.length}人接続`);
+    });
+
+    afterAll(async () => {
+        cleanupAll(players);
+        globalPlayers = [];
+        players = [];
+        await sleep(500);
+    });
+
+    for (const sec of DURATIONS_SEC) {
+        it(`${fmtDuration(sec)}間の接続維持が正常`, async () => {
+            const t0 = performance.now();
+            const result = await sustainTest(players, sec);
+            const elapsed = performance.now() - t0;
+
+            const successRate = result.totalSent / (result.totalSent + result.totalErrors);
+
+            // ラウンドごとの成功率を集計
+            const failedRounds = result.roundResults.filter(r => r.errors > 0).length;
+            const avgRoundMs = result.roundResults.reduce((a, r) => a + r.elapsed, 0) / result.roundResults.length;
+            const avgConnected = Math.round(result.roundResults.reduce((a, r) => a + r.connected, 0) / result.roundResults.length);
+
+            // 80%以上の成功率を要求（リコネクト有りで高い成功率を期待）
+            expect(successRate).toBeGreaterThanOrEqual(0.80);
+
+            console.log(`  維持 ${fmtDuration(sec)}: ${(elapsed / 1000).toFixed(1)}s 実行 ラウンド=${result.rounds} 送信=${result.totalSent} エラー=${result.totalErrors} 成功率=${(successRate * 100).toFixed(1)}% 失敗ラウンド=${failedRounds}/${result.rounds} avg送信=${avgRoundMs.toFixed(0)}ms/回 リコネクト=${result.totalReconnects} avg接続=${avgConnected}人`);
+        });
+    }
+});

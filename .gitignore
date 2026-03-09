@@ -1,72 +1,20 @@
-obj_dir/
-*.o
-*.bin
-*.elf
-*.map
-*.uf2
-*.d
-blink/
-*.vcd
-*.log
-test
-*.del
-*.tmp
-*.swp
-*.bak
-*.old
-*.exe
-*.out
-11-reboot-pico2.sh
-CMakeLists.txt.pico2
-#.gitignore
-CMakeLists.txt.Ubuntu24-NG
-do-stat.sh
-do-verilator.sh
-do-zip-for-release.sh
-stub_mutex.h
-*.Identifier
-td16
-verilated.cpp.do-not-use
-vcd_to_plantuml.py
-*.a1
-*.s1
-*.snalyzerinfo
-*.log
-test1
-*.gcno
-*.gcda
-*.gcov
-*.gcov.*
-*.cpp.cppcheck
-test1
-_old/
-test_dir/test1
-logs/cppcheck_all_report.txt
-cppcheck_all
-build/files.txt
-test_dir/test1
-node_modules/
-
 # --- Dependency Directories ---
-# npm や yarn でインストールされるライブラリ（再構築可能なので不要）
 node_modules/
-jspm_packages/
 
 # --- Build Outputs ---
-# Vite のデフォルトビルド先
 dist/
 dist-ssr/
 *.local
 
 # --- Debug Logs ---
-# エラー時のログファイル
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+*.log
+test/log
 
 # --- Environment Variables ---
-# APIキーやローカルの接続情報（絶対にコミットしない）
 .env
 .env.local
 .env.development.local
@@ -74,33 +22,31 @@ pnpm-debug.log*
 .env.production.local
 
 # --- Editor/OS Specific ---
-# 開発環境固有のファイル
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
 *.sw?
+*.Identifier
 
-# --- Babylon.js / 3D Assets (Optional) ---
-# 巨大なソースデータ（.blend, .psd）や一時的なエクスポートファイル
-# もしリポジトリが重くなるのを避けたい場合のみ指定
-# *.blend
-# *.psd
-
-# Nakama / Server auto-generated runtime files
+# --- Nakama ---
 .cookie
-*.log
-
-# Database volumes and local data (if you mapped data to a local directory)
-data/
-!data/modules/ # モジュールのソースコードディレクトリは除外しない（構成による）
-
 nakama/modules/main.js
 nakama/node_modules/
+data/
+nakama/log
 
-*.so
-*.csv
+# --- Temporary / Work ---
+*.tmp
+*.bak
+*.old
+*.del
+work/
+ss/
+.claude/
+
+# --- Large Binary ---
+pic1.png
+
+nakama/modules/world.so
+.claude/settings.json
