@@ -2,6 +2,12 @@
   "name": "tommie-chat",
   "private": true,
   "version": "0.0.1",
+  "description": "ブラウザで動く3D MMOチャットゲーム (Browser-based 3D MMO chat)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tommie-chat/tommie-chat.git"
+  },
   "type": "module",
   "scripts": {
     "//ktx2": "basisu your-image.png -ktx2 -mipmap -q 255",
