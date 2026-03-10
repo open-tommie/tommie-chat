@@ -33,7 +33,9 @@ async function createPlayer(name: string): Promise<PlayerConn> {
     const client = new Client(SERVER_KEY, HOST, PORT, false);
     const session = await client.authenticateCustom(name, true, name);
     const socket = client.createSocket(false, false);
+    socket.setHeartbeatTimeoutMs(60000);
     await socket.connect(session, true);
+    await socket.joinChat('world', 1, true, false);
 
     const result = await client.rpc(session, 'getWorldMatch', '' as unknown as object);
     const raw = typeof result.payload === 'string' ? result.payload : JSON.stringify(result.payload);
@@ -46,7 +48,8 @@ async function createPlayer(name: string): Promise<PlayerConn> {
     return { client, session, socket, matchId: data.matchId, sessionId, name };
 }
 
-function cleanup(p: PlayerConn): void {
+async function cleanup(p: PlayerConn): Promise<void> {
+    try { await p.socket.leaveMatch(p.matchId); } catch { /* ignore */ }
     try { p.socket.disconnect(true); } catch { /* ignore */ }
 }
 
@@ -73,8 +76,8 @@ async function createPlayers(prefix: string, count: number, concurrency = 50): P
     return players;
 }
 
-function cleanupAll(players: PlayerConn[]): void {
-    for (const p of players) cleanup(p);
+async function cleanupAll(players: PlayerConn[]): Promise<void> {
+    await Promise.allSettled(players.map(p => cleanup(p)));
 }
 
 /**
@@ -111,15 +114,15 @@ for (const N of CONCURRENCY_LEVELS) {
         let players: PlayerConn[] = [];
 
         afterAll(async () => {
-            cleanupAll(players);
+            await cleanupAll(players);
             players = [];
             // サーバ側の切断処理完了を待つ
-            await sleep(500);
-        });
+            await sleep(2000);
+        }, 30_000);
 
         it(`${N}人が全員ログイン成功する`, async () => {
             const t0 = performance.now();
-            players = await createPlayers(`conc${N}`, N);
+            players = await createPlayers(`__test_conc${N}`, N);
             const elapsed = performance.now() - t0;
 
             // 全員のsessionIdが存在する
@@ -144,7 +147,7 @@ for (const N of CONCURRENCY_LEVELS) {
             expect(players.length).toBe(N);
 
             // ログイン直後のソケット安定化を待つ
-            await sleep(200);
+            await sleep(500);
 
             const t0 = performance.now();
 

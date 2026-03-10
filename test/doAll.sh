@@ -44,8 +44,16 @@ run_test() {
 # 1. 同時接続テスト
 run_test "doTest-concurrent-login.sh"
 
+# サーバ側の切断処理完了を待つ
+echo "  テスト間クールダウン (3秒)..."
+sleep 3
+
 # 2. 持続接続テスト
 run_test "doTest-sustain.sh"
+
+# サーバ側の切断処理完了を待つ
+echo "  テスト間クールダウン (3秒)..."
+sleep 3
 
 # 3. 同接履歴 DB永続化テスト
 run_test "doTest-ccu-db.sh"

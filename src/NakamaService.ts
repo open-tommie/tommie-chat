@@ -1,4 +1,4 @@
-import { Client, Session, Socket, Channel, ChannelMessage, ChannelPresenceEvent, MatchData } from "@heroiclabs/nakama-js";
+import { Client, Session, Socket, Channel, ChannelMessage, ChannelPresenceEvent, MatchData, MatchPresenceEvent } from "@heroiclabs/nakama-js";
 
 const CHAT_ROOM = "world";
 const CHAT_TYPE = 1; // 1=Room, 2=DM, 3=Group
@@ -25,6 +25,8 @@ export class NakamaService {
     onPresenceJoin?: (sessionId: string, userId: string, username: string) => void;
     onPresenceNewJoin?: (sessionId: string, userId: string, username: string) => void;
     onPresenceLeave?: (sessionId: string, userId: string, username: string) => void;
+    onMatchPresenceJoin?: (sessionId: string, userId: string, username: string) => void;
+    onMatchPresenceLeave?: (sessionId: string, userId: string, username: string) => void;
     onAvatarInitPos?:    (sessionId: string, x: number, z: number, ry: number) => void;
     onAvatarMoveTarget?: (sessionId: string, x: number, z: number) => void;
     onAvatarChange?:     (sessionId: string, textureUrl: string) => void;
@@ -158,7 +160,18 @@ export class NakamaService {
         const data = JSON.parse(raw) as { matchId?: string };
         if (!data.matchId) throw new Error("getWorldMatch: no matchId");
         this.matchId = data.matchId;
-        await this.socket.joinMatch(this.matchId);
+        const match = await this.socket.joinMatch(this.matchId);
+        // マッチ初期プレゼンス通知
+        if (match.self) {
+            this.onMatchPresenceJoin?.(this.selfSessionId ?? match.self.session_id, match.self.user_id, match.self.username);
+        }
+        for (const p of match.presences ?? []) {
+            this.onMatchPresenceJoin?.(p.session_id, p.user_id, p.username);
+        }
+        this.socket.onmatchpresence = (event: MatchPresenceEvent) => {
+            for (const p of event.joins ?? []) this.onMatchPresenceJoin?.(p.session_id, p.user_id, p.username);
+            for (const p of event.leaves ?? []) this.onMatchPresenceLeave?.(p.session_id, p.user_id, p.username);
+        };
         this.socket.onmatchdata = (md: MatchData) => {
             const sid = md.presence?.session_id;
             try {
@@ -168,28 +181,28 @@ export class NakamaService {
                     this.onBlockUpdate?.(blk.gx, blk.gz, blk.blockId, blk.r ?? 255, blk.g ?? 255, blk.b ?? 255, blk.a ?? 255);
                 } else if (md.op_code === OP_AOI_ENTER) {
                     const e = payload as { sessionId: string; x: number; z: number; ry?: number; textureUrl?: string; displayName?: string };
-                    console.log(`[recv:AOI_ENTER] sid=${e.sessionId} x=${e.x} z=${e.z} tex=${e.textureUrl ?? ""} dname=${e.displayName ?? ""}`);
+                    console.log(`[recv:AOI_ENTER] sid=${e.sessionId.slice(0, 8)} x=${(+e.x).toFixed(1)} z=${(+e.z).toFixed(1)} tex=${e.textureUrl ?? ""} dname=${e.displayName ?? ""}`);
                     this.onAOIEnter?.(e.sessionId, e.x, e.z, e.ry ?? 0, e.textureUrl ?? "", e.displayName ?? "");
                 } else if (md.op_code === OP_AOI_LEAVE) {
                     const e = payload as { sessionId: string };
-                    console.log(`[recv:AOI_LEAVE] sid=${e.sessionId}`);
+                    console.log(`[recv:AOI_LEAVE] sid=${e.sessionId.slice(0, 8)}`);
                     this.onAOILeave?.(e.sessionId);
                 } else if (md.op_code === OP_DISPLAY_NAME && sid) {
                     const dn = payload as { displayName: string };
-                    console.log(`[recv:DISPLAY_NAME] sid=${sid} dname=${dn.displayName}`);
+                    console.log(`[recv:DISPLAY_NAME] sid=${sid.slice(0, 8)} dname=${dn.displayName}`);
                     this.onDisplayName?.(sid, dn.displayName);
                 } else if (!sid) {
                     return;
                 } else if (md.op_code === OP_INIT_POS) {
                     const pos = payload as { x: number; z: number; ry?: number };
-                    console.log(`[recv:INIT_POS] sid=${sid} x=${pos.x} z=${pos.z} ry=${pos.ry ?? 0}`);
+                    console.log(`[recv:INIT_POS] sid=${sid.slice(0, 8)} x=${(+pos.x).toFixed(1)} z=${(+pos.z).toFixed(1)} ry=${(+(pos.ry ?? 0)).toFixed(1)}`);
                     this.onAvatarInitPos?.(sid, pos.x, pos.z, pos.ry ?? 0);
                 } else if (md.op_code === OP_MOVE_TARGET) {
                     const pos = payload as { x: number; z: number };
                     this.onAvatarMoveTarget?.(sid, pos.x, pos.z);
                 } else if (md.op_code === OP_AVATAR_CHANGE) {
                     const av = payload as { textureUrl: string };
-                    console.log(`[recv:AVATAR_CHANGE] sid=${sid} tex=${av.textureUrl}`);
+                    console.log(`[recv:AVATAR_CHANGE] sid=${sid.slice(0, 8)} tex=${av.textureUrl}`);
                     this.onAvatarChange?.(sid, av.textureUrl);
                 }
             } catch { /* ignore */ }

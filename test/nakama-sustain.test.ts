@@ -54,6 +54,7 @@ async function connectSocket(p: PlayerConn): Promise<void> {
     const socket = p.client.createSocket(false, false);
     socket.setHeartbeatTimeoutMs(60000);
     await socket.connect(p.session, true);
+    await socket.joinChat('world', 1, true, false);
 
     const match = await socket.joinMatch(p.matchId);
     p.socket = socket;
@@ -72,6 +73,7 @@ async function createPlayer(name: string): Promise<PlayerConn> {
     const socket = client.createSocket(false, false);
     socket.setHeartbeatTimeoutMs(60000);
     await socket.connect(session, true);
+    await socket.joinChat('world', 1, true, false);
 
     const result = await client.rpc(session, 'getWorldMatch', '' as unknown as object);
     const raw = typeof result.payload === 'string' ? result.payload : JSON.stringify(result.payload);
@@ -128,7 +130,8 @@ async function reconnectDisconnected(players: PlayerConn[], concurrency = 20): P
     return reconnected;
 }
 
-function cleanup(p: PlayerConn): void {
+async function cleanup(p: PlayerConn): Promise<void> {
+    try { await p.socket.leaveMatch(p.matchId); } catch { /* ignore */ }
     try { p.socket.disconnect(true); } catch { /* ignore */ }
     p.connected = false;
 }
@@ -150,8 +153,8 @@ async function createPlayers(prefix: string, count: number, concurrency = 50): P
     return players;
 }
 
-function cleanupAll(players: PlayerConn[]): void {
-    for (const p of players) cleanup(p);
+async function cleanupAll(players: PlayerConn[]): Promise<void> {
+    await Promise.allSettled(players.map(p => cleanup(p)));
 }
 
 async function batchSend(
@@ -245,7 +248,7 @@ describe(`接続維持テスト (${PLAYER_COUNT}人, ${MAX_DURATION}秒)`, { tim
 
     beforeAll(async () => {
         totalReconnects = 0;
-        players = await createPlayers('sustain', PLAYER_COUNT);
+        players = await createPlayers('__test_sustain', PLAYER_COUNT);
         globalPlayers = players;
         await sleep(200);
 
@@ -275,7 +278,7 @@ describe(`接続維持テスト (${PLAYER_COUNT}人, ${MAX_DURATION}秒)`, { tim
     });
 
     afterAll(async () => {
-        cleanupAll(players);
+        await cleanupAll(players);
         globalPlayers = [];
         players = [];
         await sleep(500);

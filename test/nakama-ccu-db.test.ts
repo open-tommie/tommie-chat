@@ -48,6 +48,7 @@ async function createPlayer(name: string): Promise<PlayerConn> {
     const socket = client.createSocket(false, false);
     socket.setHeartbeatTimeoutMs(60000);
     await socket.connect(session, true);
+    await socket.joinChat('world', 1, true, false);
 
     const result = await client.rpc(session, 'getWorldMatch', '' as unknown as object);
     const raw = typeof result.payload === 'string' ? result.payload : JSON.stringify(result.payload);
@@ -58,7 +59,8 @@ async function createPlayer(name: string): Promise<PlayerConn> {
     return { client, session, socket, matchId: data.matchId, name };
 }
 
-function cleanup(p: PlayerConn): void {
+async function cleanup(p: PlayerConn): Promise<void> {
+    try { await p.socket.leaveMatch(p.matchId); } catch { /* ignore */ }
     try { p.socket.disconnect(true); } catch { /* ignore */ }
 }
 
@@ -75,7 +77,7 @@ async function waitForServer(maxMs = 30000): Promise<void> {
     while (Date.now() - start < maxMs) {
         try {
             const c = new Client(SERVER_KEY, HOST, PORT, false);
-            const s = await c.authenticateCustom('_health_check', true, '_health_check');
+            const s = await c.authenticateCustom('__test_health_check', true, '__test_health_check');
             await c.rpc(s, 'ping', {} as unknown as object);
             return;
         } catch {
@@ -102,7 +104,7 @@ async function restartServer(): Promise<void> {
 
 async function newAdmin(): Promise<{ client: Client; session: Session }> {
     const client = new Client(SERVER_KEY, HOST, PORT, false);
-    const session = await client.authenticateCustom('ccu_admin', true, 'ccu_admin');
+    const session = await client.authenticateCustom('__test_ccu_admin', true, '__test_ccu_admin');
     return { client, session };
 }
 
@@ -122,15 +124,15 @@ async function waitFor1mFlush(client: Client, session: Session, minCount: number
 describe(`同接履歴 DB永続化 [${TEST_LEVEL}]`, () => {
     const players: PlayerConn[] = [];
 
-    afterAll(() => {
-        for (const p of players) cleanup(p);
+    afterAll(async () => {
+        await Promise.allSettled(players.map(p => cleanup(p)));
     });
 
     // ── 1m: 1sサンプリング確認 ──
     it('1sサンプリングが動作する', async () => {
         console.log(`[1s] ${PLAYER_COUNT}人 接続中...`);
         for (let i = 0; i < PLAYER_COUNT; i++) {
-            players.push(await createPlayer(`ccu_test_${i}`));
+            players.push(await createPlayer(`__test_ccu_${i}`));
         }
         console.log(`[1s] ${players.length}人 接続完了`);
 
@@ -166,13 +168,18 @@ describe(`同接履歴 DB永続化 [${TEST_LEVEL}]`, () => {
             disconnected.push(players[i]);
         }
         console.log(`[reconn] ${half}人を切断`);
-        await sleep(2000); // 1秒サンプリングの反映を待つ
 
-        // count が減ったことを確認
-        const afterDisconnect = await rpcGetPlayerCount(client, session);
-        console.log(`[reconn] 切断後count=${afterDisconnect.count} (期待: ${baseCount - half})`);
-        expect(afterDisconnect.count).toBeLessThanOrEqual(baseCount - half + 1);
-        expect(afterDisconnect.count).toBeGreaterThanOrEqual(baseCount - half - 1);
+        // count が減ったことをポーリングで確認
+        const expectAfterDisconnect = baseCount - half;
+        let afterDisconnect = { count: 0 };
+        for (let attempt = 0; attempt < 10; attempt++) {
+            await sleep(1000);
+            afterDisconnect = await rpcGetPlayerCount(client, session);
+            console.log(`[reconn] 切断後 attempt=${attempt} count=${afterDisconnect.count} (期待: ${expectAfterDisconnect})`);
+            if (afterDisconnect.count >= expectAfterDisconnect - 1 && afterDisconnect.count <= expectAfterDisconnect + 1) break;
+        }
+        expect(afterDisconnect.count).toBeLessThanOrEqual(expectAfterDisconnect + 1);
+        expect(afterDisconnect.count).toBeGreaterThanOrEqual(expectAfterDisconnect - 1);
 
         // 切断した分を再接続
         for (let i = 0; i < half; i++) {
@@ -180,14 +187,18 @@ describe(`同接履歴 DB永続化 [${TEST_LEVEL}]`, () => {
             players[i] = await createPlayer(name);
         }
         console.log(`[reconn] ${half}人を再接続`);
-        await sleep(2000); // 1秒サンプリングの反映を待つ
 
-        // count が戻ったことを確認
-        const afterReconnect = await rpcGetPlayerCount(client, session);
-        console.log(`[reconn] 再接続後count=${afterReconnect.count} (期待: ${baseCount})`);
+        // count が戻ったことをポーリングで確認
+        let afterReconnect = { count: 0 };
+        for (let attempt = 0; attempt < 10; attempt++) {
+            await sleep(1000);
+            afterReconnect = await rpcGetPlayerCount(client, session);
+            console.log(`[reconn] 再接続後 attempt=${attempt} count=${afterReconnect.count} (期待: ${baseCount})`);
+            if (afterReconnect.count >= baseCount - 1 && afterReconnect.count <= baseCount + 1) break;
+        }
         expect(afterReconnect.count).toBeGreaterThanOrEqual(baseCount - 1);
         expect(afterReconnect.count).toBeLessThanOrEqual(baseCount + 1);
-    }, 30000);
+    }, 60000);
 
     // ── 1m: RPC各レンジ疎通 ──
     it('RPC全レンジが応答する', async () => {
@@ -241,7 +252,7 @@ describe(`同接履歴 DB永続化 [${TEST_LEVEL}]`, () => {
 
         // 1mフラッシュを待つ（新規データが追加されるよう接続）
         for (let i = 0; i < 3; i++) {
-            players.push(await createPlayer(`ccu_dedup_${i}`));
+            players.push(await createPlayer(`__test_ccu_dedup_${i}`));
         }
         console.log('[dedup-2] 1分フラッシュ待ち...');
         await waitFor1mFlush(client, session, 0);
@@ -300,7 +311,7 @@ describe(`同接履歴 DB永続化 [${TEST_LEVEL}]`, () => {
 
             // プレイヤー接続
             for (let i = 0; i < PLAYER_COUNT; i++) {
-                players.push(await createPlayer(`ccu_30m_c${cycle}_${i}`));
+                players.push(await createPlayer(`__test_ccu_30m_c${cycle}_${i}`));
             }
 
             const { client, session } = await newAdmin();
@@ -343,7 +354,7 @@ describe(`同接履歴 DB永続化 [${TEST_LEVEL}]`, () => {
 
         // プレイヤー接続
         for (let i = 0; i < PLAYER_COUNT; i++) {
-            players.push(await createPlayer(`ccu_1h_${i}`));
+            players.push(await createPlayer(`__test_ccu_1h_${i}`));
         }
 
         const start = Date.now();

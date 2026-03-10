@@ -475,8 +475,8 @@ export function setupHtmlUI(game: GameScene): void {
         });
     };
 
-    const userMap = new Map<string, { username: string; displayName: string; uuid: string; sessionId: string; loginTimestamp: number; loginTime: string }>();
-    type UlSortKey = "username" | "displayName" | "uuid" | "sessionId" | "loginTime" | "loginTimestamp";
+    const userMap = new Map<string, { username: string; displayName: string; uuid: string; sessionId: string; loginTimestamp: number; loginTime: string; channel: "chat" | "match" | "chat+match" }>();
+    type UlSortKey = "username" | "displayName" | "uuid" | "sessionId" | "loginTime" | "loginTimestamp" | "channel";
     let ulSortKey: UlSortKey = "username";
     let ulSortAsc = true;
     const thUser  = document.getElementById("ul-th-user")  as HTMLTableCellElement;
@@ -503,8 +503,8 @@ export function setupHtmlUI(game: GameScene): void {
         const entries = [...userMap.values()].sort((a, b) => {
             if (ulSortKey === "loginTimestamp")
                 return ulSortAsc ? a.loginTimestamp - b.loginTimestamp : b.loginTimestamp - a.loginTimestamp;
-            const va = a[ulSortKey as "username" | "displayName" | "uuid" | "sessionId" | "loginTime"] ?? "";
-            const vb = b[ulSortKey as "username" | "displayName" | "uuid" | "sessionId" | "loginTime"] ?? "";
+            const va = a[ulSortKey as "username" | "displayName" | "uuid" | "sessionId" | "loginTime" | "channel"] ?? "";
+            const vb = b[ulSortKey as "username" | "displayName" | "uuid" | "sessionId" | "loginTime" | "channel"] ?? "";
             return ulSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
         });
         const arrow = ulSortAsc ? "▲" : "▼";
@@ -514,12 +514,14 @@ export function setupHtmlUI(game: GameScene): void {
         if (thSid)   thSid.dataset.sort   = ulSortKey === "sessionId"     ? arrow : "";
         if (thTime)  thTime.dataset.sort  = ulSortKey === "loginTime"     ? arrow : "";
         if (thRel)   thRel.dataset.sort   = ulSortKey === "loginTimestamp" ? arrow : "";
+        const thCh = document.getElementById("ul-th-ch");
+        if (thCh)    thCh.dataset.sort    = ulSortKey === "channel"        ? arrow : "";
         const myId = game.nakama.selfSessionId ?? "";
-        for (const { username, displayName, uuid, sessionId, loginTimestamp, loginTime } of entries) {
+        for (const { username, displayName, uuid, sessionId, loginTimestamp, loginTime, channel } of entries) {
             const tr = document.createElement("tr");
             const bold = sessionId === myId ? " class=\"ul-self\"" : "";
             const rel = relativeTime(loginTimestamp);
-            tr.innerHTML = `<td${bold} title="${username}">${username}</td><td title="${displayName}">${displayName}</td><td class="uuid-cell" data-copy="${uuid}" title="${uuid}&#10;クリックでコピー">${uuid.slice(0, 8)}</td><td class="uuid-cell" data-copy="${sessionId.slice(0, 8)}" title="${sessionId.slice(0, 8)}&#10;クリックでコピー">${sessionId.slice(0, 8)}</td><td title="${rel}">${rel}</td><td title="${loginTime}">${loginTime}</td>`;
+            tr.innerHTML = `<td${bold} title="${username}">${username}</td><td title="${displayName}">${displayName}</td><td class="uuid-cell" data-copy="${uuid}" title="${uuid}&#10;クリックでコピー">${uuid.slice(0, 8)}</td><td class="uuid-cell" data-copy="${sessionId.slice(0, 8)}" title="${sessionId.slice(0, 8)}&#10;クリックでコピー">${sessionId.slice(0, 8)}</td><td title="${channel}">${channel}</td><td title="${rel}">${rel}</td><td title="${loginTime}">${loginTime}</td>`;
             // uuid-cell click to copy
             tr.querySelectorAll(".uuid-cell").forEach(td => {
                 td.addEventListener("click", () => {
@@ -547,6 +549,7 @@ export function setupHtmlUI(game: GameScene): void {
     if (thSid)   thSid.addEventListener("click",   () => setUlSort("sessionId"));
     if (thTime)  thTime.addEventListener("click",  () => setUlSort("loginTime"));
     if (thRel)   thRel.addEventListener("click",   () => setUlSort("loginTimestamp"));
+    { const thCh = document.getElementById("ul-th-ch"); if (thCh) thCh.addEventListener("click", () => setUlSort("channel")); }
 
     setInterval(renderUserList, 10000);
 
@@ -573,7 +576,7 @@ export function setupHtmlUI(game: GameScene): void {
         }
     };
     game.nakama.onAvatarInitPos = (sessionId: string, x: number, z: number, ry: number) => {
-        console.log(`[onAvatarInitPos] sid=${sessionId} x=${x} z=${z} hasAvatar=${game.remoteAvatars.has(sessionId)}`);
+        console.log(`[onAvatarInitPos] sid=${sessionId.slice(0, 8)} x=${(+x).toFixed(1)} z=${(+z).toFixed(1)} hasAvatar=${game.remoteAvatars.has(sessionId)}`);
         const av = game.remoteAvatars.get(sessionId);
         if (av) {
             av.position.x = x; av.position.z = z; av.rotation.y = ry;
@@ -585,12 +588,12 @@ export function setupHtmlUI(game: GameScene): void {
         if (game.remoteAvatars.has(sessionId)) game.remoteTargets.set(sessionId, { x, z });
     };
     game.nakama.onAvatarChange = (sessionId: string, textureUrl: string) => {
-        console.log(`[avatarChange] sessionId=${sessionId} textureUrl=${textureUrl}`);
+        console.log(`[avatarChange] sid=${sessionId.slice(0, 8)} textureUrl=${textureUrl}`);
         const av = game.remoteAvatars.get(sessionId);
         if (av) game.avatarSystem.changeAvatarTexture(av, textureUrl);
     };
     game.nakama.onAOIEnter = (sessionId: string, x: number, z: number, ry: number, textureUrl: string, displayName: string) => {
-        console.log(`[AOI_ENTER] sid=${sessionId} x=${x} z=${z} ry=${ry} tex=${textureUrl} dname=${displayName}`);
+        console.log(`[AOI_ENTER] sid=${sessionId.slice(0, 8)} x=${(+x).toFixed(1)} z=${(+z).toFixed(1)} ry=${(+ry).toFixed(1)} tex=${textureUrl} dname=${displayName}`);
         if (sessionId === game.nakama.selfSessionId) return;
         const av = game.remoteAvatars.get(sessionId);
         if (av) {
@@ -605,7 +608,7 @@ export function setupHtmlUI(game: GameScene): void {
         }
     };
     game.nakama.onDisplayName = (sessionId: string, displayName: string) => {
-        console.log(`[onDisplayName] sid=${sessionId} displayName=${displayName}`);
+        console.log(`[onDisplayName] sid=${sessionId.slice(0, 8)} displayName=${displayName}`);
         // アバターのnameTag更新
         const updater = game.remoteNameUpdaters.get(sessionId);
         if (updater) updater(displayName);
@@ -619,7 +622,7 @@ export function setupHtmlUI(game: GameScene): void {
         renderUserList();
     };
     game.nakama.onAOILeave = (sessionId: string) => {
-        console.log(`[AOI_LEAVE] sid=${sessionId}`);
+        console.log(`[AOI_LEAVE] sid=${sessionId.slice(0, 8)}`);
         if (sessionId === game.nakama.selfSessionId) return;
         const av = game.remoteAvatars.get(sessionId);
         if (av) av.setEnabled(false);
@@ -674,15 +677,40 @@ export function setupHtmlUI(game: GameScene): void {
         } catch { /* ignore */ }
     };
 
+    // 同じuserIdの古いセッションを削除（再接続時の重複防止）
+    const removeStaleEntries = (newSessionId: string, userId: string) => {
+        for (const [sid, entry] of userMap) {
+            if (entry.uuid === userId && sid !== newSessionId) {
+                userMap.delete(sid);
+            }
+        }
+    };
+
+    // チャンネル情報を付与してuserMapに追加/更新
+    const addChannelFlag = (sessionId: string, flag: "chat" | "match") => {
+        const existing = userMap.get(sessionId);
+        if (!existing) return;
+        if (existing.channel === "chat+match") return;
+        if (existing.channel !== flag) {
+            userMap.set(sessionId, { ...existing, channel: "chat+match" });
+        }
+    };
+
     game.nakama.onPresenceJoin = (sessionId, userId, username) => {
-        userMap.set(sessionId, { username, displayName: "", uuid: userId, sessionId, loginTimestamp: Date.now(), loginTime: "…" });
+        removeStaleEntries(sessionId, userId);
+        const existing = userMap.get(sessionId);
+        const ch = existing ? (existing.channel === "match" ? "chat+match" : existing.channel) : "chat";
+        userMap.set(sessionId, { username, displayName: existing?.displayName ?? "", uuid: userId, sessionId, loginTimestamp: existing?.loginTimestamp ?? Date.now(), loginTime: existing?.loginTime ?? "…", channel: ch as "chat" | "match" | "chat+match" });
         renderUserList();
         fetchAndSetLoginTime(sessionId, userId, username);
         fetchAndSetDisplayName(sessionId, userId);
         addRemoteAvatar(sessionId, username);
     };
     game.nakama.onPresenceNewJoin = (sessionId, userId, username) => {
-        userMap.set(sessionId, { username, displayName: "", uuid: userId, sessionId, loginTimestamp: Date.now(), loginTime: "…" });
+        removeStaleEntries(sessionId, userId);
+        const existing = userMap.get(sessionId);
+        const ch = existing ? (existing.channel === "match" ? "chat+match" : existing.channel) : "chat";
+        userMap.set(sessionId, { username, displayName: existing?.displayName ?? "", uuid: userId, sessionId, loginTimestamp: existing?.loginTimestamp ?? Date.now(), loginTime: existing?.loginTime ?? "…", channel: ch as "chat" | "match" | "chat+match" });
         renderUserList();
         fetchAndSetLoginTime(sessionId, userId, username);
         fetchAndSetDisplayName(sessionId, userId);
@@ -692,12 +720,41 @@ export function setupHtmlUI(game: GameScene): void {
         game.nakama.sendAvatarChange(game.playerTextureUrl).catch(() => {});
     };
     game.nakama.onPresenceLeave = (sessionId, _userId, uname) => {
-        if (userMap.has(sessionId)) {
-            userMap.delete(sessionId);
-            addChatHistory("[system]", `${uname}がログアウトしました。`);
+        const existing = userMap.get(sessionId);
+        if (existing) {
+            if (existing.channel === "chat+match") {
+                // chatだけ外す → matchのみに
+                userMap.set(sessionId, { ...existing, channel: "match" });
+            } else {
+                userMap.delete(sessionId);
+                addChatHistory("[system]", `${uname}がログアウトしました。`);
+            }
         }
         renderUserList();
         removeRemoteAvatar(sessionId);
+    };
+    game.nakama.onMatchPresenceJoin = (sessionId, userId, username) => {
+        removeStaleEntries(sessionId, userId);
+        const existing = userMap.get(sessionId);
+        if (existing) {
+            addChannelFlag(sessionId, "match");
+        } else {
+            userMap.set(sessionId, { username, displayName: "", uuid: userId, sessionId, loginTimestamp: Date.now(), loginTime: "…", channel: "match" });
+            fetchAndSetDisplayName(sessionId, userId);
+        }
+        renderUserList();
+    };
+    game.nakama.onMatchPresenceLeave = (sessionId, _userId, _uname) => {
+        const existing = userMap.get(sessionId);
+        if (existing) {
+            if (existing.channel === "chat+match") {
+                // matchだけ外す → chatのみに
+                userMap.set(sessionId, { ...existing, channel: "chat" });
+            } else if (existing.channel === "match") {
+                userMap.delete(sessionId);
+            }
+        }
+        renderUserList();
     };
 
     const setLoginMode = () => {

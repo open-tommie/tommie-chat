@@ -36,6 +36,7 @@ async function createPlayer(name: string): Promise<PlayerConn> {
     const session = await client.authenticateCustom(name, true, name);
     const socket = client.createSocket(false, false);
     await socket.connect(session, true);
+    await socket.joinChat('world', 1, true, false);
 
     // getWorldMatch RPC
     const result = await client.rpc(session, 'getWorldMatch', '' as unknown as object);
@@ -52,7 +53,8 @@ async function sendAOI(p: PlayerConn, minCX: number, minCZ: number, maxCX: numbe
     await p.socket.sendMatchState(p.matchId, OP_AOI_UPDATE, JSON.stringify({ minCX, minCZ, maxCX, maxCZ }));
 }
 
-function cleanup(p: PlayerConn): void {
+async function cleanup(p: PlayerConn): Promise<void> {
+    try { await p.socket.leaveMatch(p.matchId); } catch { /* ignore */ }
     try { p.socket.disconnect(true); } catch { /* ignore */ }
 }
 
@@ -67,14 +69,14 @@ describe('Nakama AOI 統合テスト', () => {
     let p2: PlayerConn;
 
     beforeAll(async () => {
-        p1 = await createPlayer('test_aoi_p1');
+        p1 = await createPlayer('__test_aoi_p1');
         await sleep(500); // MatchList インデックス反映待ち
-        p2 = await createPlayer('test_aoi_p2');
+        p2 = await createPlayer('__test_aoi_p2');
     });
 
-    afterAll(() => {
-        cleanup(p1);
-        cleanup(p2);
+    afterAll(async () => {
+        await cleanup(p1);
+        await cleanup(p2);
     });
 
     it('サーバ接続とマッチ参加', () => {
@@ -206,14 +208,14 @@ describe('Nakama AOI 移動フィルタリングテスト', () => {
     let p2: PlayerConn;
 
     beforeAll(async () => {
-        p1 = await createPlayer('test_move_p1');
+        p1 = await createPlayer('__test_move_p1');
         await sleep(500);
-        p2 = await createPlayer('test_move_p2');
+        p2 = await createPlayer('__test_move_p2');
     });
 
-    afterAll(() => {
-        cleanup(p1);
-        cleanup(p2);
+    afterAll(async () => {
+        await cleanup(p1);
+        await cleanup(p2);
     });
 
     it('AOI内の移動メッセージを受信する', async () => {
@@ -340,14 +342,14 @@ describe('Nakama AOI 表示/非表示テスト', () => {
     let p2: PlayerConn;
 
     beforeAll(async () => {
-        p1 = await createPlayer('test_vis_p1');
+        p1 = await createPlayer('__test_vis_p1');
         await sleep(500);
-        p2 = await createPlayer('test_vis_p2');
+        p2 = await createPlayer('__test_vis_p2');
     });
 
-    afterAll(() => {
-        cleanup(p1);
-        cleanup(p2);
+    afterAll(async () => {
+        await cleanup(p1);
+        await cleanup(p2);
     });
 
     it('AOI内のプレイヤーにINIT_POSが届く', async () => {
@@ -573,7 +575,7 @@ describe('Nakama AOI 表示/非表示テスト', () => {
 
     it('AOI未登録のプレイヤーにもINIT_POSが届く', async () => {
         // p3を新規作成（AOI未登録状態=MatchJoinのデフォルト全域AOI）
-        const p3 = await createPlayer('test_vis_p3');
+        const p3 = await createPlayer('__test_vis_p3');
         await sleep(200);
 
         const received: { x: number; z: number }[] = [];
@@ -633,14 +635,14 @@ describe('Nakama AOI 連続移動テスト', () => {
     let p2: PlayerConn;
 
     beforeAll(async () => {
-        p1 = await createPlayer('test_contmove_p1');
+        p1 = await createPlayer('__test_contmove_p1');
         await sleep(500);
-        p2 = await createPlayer('test_contmove_p2');
+        p2 = await createPlayer('__test_contmove_p2');
     });
 
-    afterAll(() => {
-        cleanup(p1);
-        cleanup(p2);
+    afterAll(async () => {
+        await cleanup(p1);
+        await cleanup(p2);
     });
 
     it('連続MOVE_TARGETでチャンクをまたぐとAOI_ENTERが届く', async () => {
@@ -798,11 +800,11 @@ describe('Nakama AOI 境界値テスト', () => {
     let p1: PlayerConn;
 
     beforeAll(async () => {
-        p1 = await createPlayer('test_aoi_edge');
+        p1 = await createPlayer('__test_aoi_edge');
     });
 
-    afterAll(() => {
-        cleanup(p1);
+    afterAll(async () => {
+        await cleanup(p1);
     });
 
     it('最小AOI (1チャンク) を送信できる', async () => {

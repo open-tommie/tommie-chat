@@ -251,7 +251,7 @@ export class GameScene {
                 this.chunks.set(key, { cells: new Uint8Array(rec.cells), hash: BigInt(rec.hash || "0") });
                 this.dbHashes.set(key, rec.hash || "0");
             }
-            console.log(`[ChunkDB] loaded ${records.length} chunks from IndexedDB (user=${userId})`);
+            console.log(`[ChunkDB] loaded ${records.length} chunks from IndexedDB (user=${userId.slice(0, 8)})`);
         } catch (e) {
             console.warn("[ChunkDB] load failed:", e);
         }

@@ -107,7 +107,7 @@ if (failures.length > 0) {
 
 // コンソール出力から主要ログを抽出
 const consoleText = fs.readFileSync('/tmp/vitest-ccu-db-console.txt', 'utf8').replace(/\x1b\[[0-9;]*m/g, '');
-const logLines = consoleText.split('\n').filter(l => /^\[\\d\]/.test(l.trim()) || /stdout/.test(l));
+const logLines = consoleText.split('\n').filter(l => /^\[\d/.test(l.trim()) || /stdout/.test(l));
 if (logLines.length > 0) {
     lines.push('');
     lines.push('## テストログ');

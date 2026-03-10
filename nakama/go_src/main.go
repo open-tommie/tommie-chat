@@ -396,26 +396,51 @@ func rpcGetServerInfo(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	return string(b), nil
 }
 
+// worldMatchID はプロセス内で一意のワールドマッチIDをキャッシュする
+var (
+	worldMatchMu       sync.Mutex
+	worldMatchID       string
+	worldMatchCachedAt time.Time
+)
+
+const worldMatchCacheTTL = 10 * time.Second
+
 // rpcGetWorldMatch は稼働中の "world" マッチを探し、なければ新規作成して返す
 func rpcGetWorldMatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	uid, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 	logf("[getWorldMatch] uid=%s\n", uid)
+
+	worldMatchMu.Lock()
+	defer worldMatchMu.Unlock()
+
+	// キャッシュが新しい場合はそのまま返す
+	if worldMatchID != "" && time.Since(worldMatchCachedAt) < worldMatchCacheTTL {
+		logger.Info("Cached world match: %s", worldMatchID)
+		b, _ := json.Marshal(map[string]string{"matchId": worldMatchID})
+		return string(b), nil
+	}
+
+	// MatchListで既存マッチを探す（キャッシュ期限切れ or 初回）
 	matches, err := nk.MatchList(ctx, 1, true, "world", nil, nil, "")
 	if err != nil {
 		logger.Warn("MatchList failed: %v", err)
 	} else if len(matches) > 0 {
-		matchID := matches[0].GetMatchId()
-		logger.Info("Found active world match: %s", matchID)
-		b, _ := json.Marshal(map[string]string{"matchId": matchID})
+		worldMatchID = matches[0].GetMatchId()
+		worldMatchCachedAt = time.Now()
+		logger.Info("Found active world match: %s", worldMatchID)
+		b, _ := json.Marshal(map[string]string{"matchId": worldMatchID})
 		return string(b), nil
 	}
 
-	matchID, err := nk.MatchCreate(ctx, "world", map[string]interface{}{})
+	// マッチが見つからない場合は新規作成
+	worldMatchID, err = nk.MatchCreate(ctx, "world", map[string]interface{}{})
 	if err != nil {
+		worldMatchID = ""
 		return "", err
 	}
-	logger.Info("Created world match: %s", matchID)
-	b, _ := json.Marshal(map[string]string{"matchId": matchID})
+	worldMatchCachedAt = time.Now()
+	logger.Info("Created world match: %s", worldMatchID)
+	b, _ := json.Marshal(map[string]string{"matchId": worldMatchID})
 	return string(b), nil
 }
 
