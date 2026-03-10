@@ -725,6 +725,8 @@
             box-shadow: 0 4px 10px rgba(0,0,0,0.12);
             z-index: 300;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
             font-family: "Courier New", Courier, monospace;
             font-size: 12px;
             color: #000;
@@ -752,6 +754,10 @@
         #about-panel-body {
             padding: 10px 16px;
             line-height: 1.4;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            flex: 1;
+            min-height: 0;
         }
         #about-panel-body p {
             margin: 0 0 4px 0;
@@ -965,7 +971,9 @@
             #server-settings-panel,
             #server-log-panel,
             #ping-panel,
-            #debug-overlay {
+            #ccu-panel,
+            #debug-overlay,
+            #about-panel {
                 font-size: 16px;
                 left: 0 !important;
                 right: 0 !important;
@@ -985,7 +993,9 @@
             #server-settings-header,
             #server-log-header,
             #ping-header,
-            #debug-title-bar {
+            #ccu-header,
+            #debug-title-bar,
+            #about-panel-header {
                 display: flex !important;
                 align-items: center !important;
                 justify-content: space-between !important;
@@ -1002,7 +1012,9 @@
             #chat-history-close,
             #server-settings-close,
             #server-log-close,
-            #ping-close {
+            #ping-close,
+            #ccu-close,
+            #about-panel-close {
                 font-size: 15px;
                 padding: 6px 8px;
                 color: #fff !important;
@@ -1132,7 +1144,8 @@
 
             /* --- ログアウト確認パネル --- */
             #logout-panel {
-                width: 280px;
+                width: 80vw;
+                max-width: 320px;
                 background: #222 !important;
                 color: #eee !important;
             }
@@ -1140,25 +1153,28 @@
                 background: rgba(255,255,255,0.1) !important;
                 color: #fff !important;
                 border-bottom-color: rgba(255,255,255,0.2) !important;
+                font-size: 15px !important;
+            }
+            #logout-panel-close {
+                font-size: 15px;
+                padding: 6px 8px;
+                color: #fff !important;
             }
             #logout-panel-body p {
                 color: #eee !important;
-                font-size: 15px;
+                font-size: 16px;
+            }
+            .logout-panel-btns button {
+                font-size: 14px !important;
+                padding: 8px 20px !important;
             }
 
             /* --- このゲームについてパネル --- */
-            #about-panel {
-                width: 280px;
-                background: #222 !important;
-                color: #eee !important;
-            }
-            #about-panel-header {
-                background: rgba(255,255,255,0.1) !important;
-                color: #fff !important;
-                border-bottom-color: rgba(255,255,255,0.2) !important;
-            }
             #about-panel-body p {
                 color: #eee !important;
+            }
+            #about-panel-body a {
+                color: #6cb4ff !important;
             }
 
             /* --- フッター --- */
@@ -1254,7 +1270,9 @@
             #server-settings-panel,
             #server-log-panel,
             #ping-panel,
-            #debug-overlay {
+            #ccu-panel,
+            #debug-overlay,
+            #about-panel {
                 left: calc(var(--ls-divider, 60%) + 12px) !important;
                 right: 0 !important;
                 top: 0 !important;
