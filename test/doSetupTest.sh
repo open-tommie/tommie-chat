@@ -56,7 +56,8 @@ cleanup() {
         cd "$WORK_DIR/nakama" && docker compose down 2>/dev/null || true
         cd /tmp
     fi
-    rm -rf "$WORK_DIR"
+    # root 所有ファイル（Docker で生成）を含む場合があるため docker で削除
+    docker run --rm -v /tmp:/tmp alpine rm -rf "$WORK_DIR" 2>/dev/null || rm -rf "$WORK_DIR"
     echo "Done: $WORK_DIR を削除しました"
     # 元のサーバーを再起動
     if [ -f "$PROJECT_DIR/nakama/docker-compose.yml" ]; then

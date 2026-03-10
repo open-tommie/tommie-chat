@@ -64,6 +64,6 @@ docker run --rm \
   -e GOCACHE=/tmp/go-build \
   -w /go_src \
   "$BUILDER_IMG" \
-  -c "rm -f go.sum && GONOSUMDB='*' go build -mod=mod -buildmode=plugin -trimpath -o /output/world.so ."
+  -c "rm -f go.sum && GONOSUMDB='*' go build -mod=mod -buildmode=plugin -trimpath -o /output/world.so . && chown $(id -u):$(id -g) /output/world.so"
 
 echo "Built: $OUT_DIR/world.so"
