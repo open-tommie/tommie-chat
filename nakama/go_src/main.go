@@ -460,6 +460,14 @@ func (m *worldMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *s
 	}, 10, "world"
 }
 
+// shortSID はセッションIDを先頭8文字に切り詰める（クライアント送信用）
+func shortSID(sid string) string {
+	if len(sid) > 8 {
+		return sid[:8]
+	}
+	return sid
+}
+
 func (m *worldMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, presence runtime.Presence, metadata map[string]string) (interface{}, bool, string) {
 	return state, true, ""
 }
@@ -787,7 +795,7 @@ func (m *worldMatch) handleGetPlayersAOI(ms *matchState, data string) (interface
 			z = pos.Z
 		}
 		entries = append(entries, aoiEntry{
-			SessionID: sid,
+			SessionID: shortSID(sid),
 			Username:  p.GetUsername(),
 			MinCX:     aoi.MinCX,
 			MinCZ:     aoi.MinCZ,

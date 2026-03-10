@@ -317,7 +317,7 @@ export function setupDebugOverlay(game: GameScene): void {
         };
         makeToggle("menu-serversettings", "server-settings-panel", "サーバ設定",    "showSrvSettings");
         makeToggle("menu-serverlog",      "server-log-panel",      "サーバ接続ログ", "showSrvLog");
-        makeToggle("menu-userlist",       "user-list-panel",       "ユーザリスト",  "showUserList");
+        makeToggle("menu-userlist",       "user-list-panel",       "プレイヤーリスト",  "showUserList");
         makeToggle("menu-chathistory",    "chat-history-panel",    "チャット履歴",  "showChatHist");
         makeToggle("menu-ping",           "ping-panel",            "Ping グラフ",   "showPing");
         makeToggle("menu-ccu",            "ccu-panel",             "同接グラフ",    "showCcu");

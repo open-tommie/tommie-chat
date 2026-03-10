@@ -278,7 +278,7 @@ export function setupHtmlUI(game: GameScene): void {
                     ulPanel.style.display = "none";
                     sCookieFn("showUserList", "0");
                     const mb = document.getElementById("menu-userlist");
-                    if (mb) mb.textContent = "　 ユーザリスト";
+                    if (mb) mb.textContent = "　 プレイヤーリスト";
                 });
             }
         }
@@ -519,11 +519,11 @@ export function setupHtmlUI(game: GameScene): void {
             const tr = document.createElement("tr");
             const bold = sessionId === myId ? " class=\"ul-self\"" : "";
             const rel = relativeTime(loginTimestamp);
-            tr.innerHTML = `<td${bold} title="${username}">${username}</td><td title="${displayName}">${displayName}</td><td class="uuid-cell" title="${uuid}&#10;クリックでコピー">${uuid}</td><td class="uuid-cell" title="${sessionId}&#10;クリックでコピー">${sessionId}</td><td title="${rel}">${rel}</td><td title="${loginTime}">${loginTime}</td>`;
+            tr.innerHTML = `<td${bold} title="${username}">${username}</td><td title="${displayName}">${displayName}</td><td class="uuid-cell" data-copy="${uuid}" title="${uuid}&#10;クリックでコピー">${uuid.slice(0, 8)}</td><td class="uuid-cell" data-copy="${sessionId.slice(0, 8)}" title="${sessionId.slice(0, 8)}&#10;クリックでコピー">${sessionId.slice(0, 8)}</td><td title="${rel}">${rel}</td><td title="${loginTime}">${loginTime}</td>`;
             // uuid-cell click to copy
             tr.querySelectorAll(".uuid-cell").forEach(td => {
                 td.addEventListener("click", () => {
-                    const text = (td as HTMLElement).textContent ?? "";
+                    const text = (td as HTMLElement).dataset.copy ?? (td as HTMLElement).textContent ?? "";
                     navigator.clipboard.writeText(text).then(() => {
                         const orig = (td as HTMLElement).textContent;
                         (td as HTMLElement).textContent = "コピー済み";

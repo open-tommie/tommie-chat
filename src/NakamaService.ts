@@ -64,8 +64,7 @@ export class NakamaService {
             await this.client.updateAccount(this.session, { username: loginName });
             this.session = await this.client.authenticateDevice(deviceId, false);
         }
-        console.log("[NakamaService] session token:", this.session.token);
-        console.log("[NakamaService] username:", this.session.username);
+        console.log("[Login] username:", this.session.username);
 
         this.socket = this.client.createSocket(false, false);
         this.socket.setHeartbeatTimeoutMs(60000);
