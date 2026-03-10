@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -122,7 +123,7 @@ var (
 	ccuHistory1m   []int   // 1分間隔サンプル（1分間の平均値）
 	ccuHistory1mTs []int64 // 1分間隔サンプルのUnix秒タイムスタンプ
 	ccu1sAccum     []int   // 1分間の1sサンプル蓄積（平均計算用）
-
+	ccuLiveCount   int64   // MatchJoin/Leaveで増減するリアルタイム同接数
 )
 
 func appendCcu1sSample(count int) {
@@ -224,12 +225,7 @@ func getCcuHistoryRange(rangeStr string) ccuHistoryResult {
 }
 
 func getLatestCcu() int {
-	ccuMu.Lock()
-	defer ccuMu.Unlock()
-	if len(ccuHistory1s) > 0 {
-		return ccuHistory1s[len(ccuHistory1s)-1]
-	}
-	return 0
+	return int(atomic.LoadInt64(&ccuLiveCount))
 }
 
 // ストレージキー
@@ -711,7 +707,9 @@ func (m *worldMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *s
 
 	// 同接数サンプリング（1秒ごと）
 	if tick%ccuSampleTicks == 0 {
-		appendCcu1sSample(len(ms.Presences))
+		n := len(ms.Presences)
+		appendCcu1sSample(n)
+		atomic.StoreInt64(&ccuLiveCount, int64(n))
 	}
 	// 1分ごとに1m履歴へフラッシュ
 	if tick%ccuMinuteTicks == 0 {

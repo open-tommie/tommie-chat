@@ -236,9 +236,11 @@ async function sustainTest(
 
 // ── テスト ──
 
-const DURATIONS_SEC = [1, 10, 30, 60];
+const ALL_DURATIONS_SEC = [1, 10, 30, 60, 120, 180, 300, 600];
+const MAX_DURATION = parseInt(process.env.SUSTAIN_DURATION ?? '90', 10);
+const DURATIONS_SEC = ALL_DURATIONS_SEC.filter(d => d <= MAX_DURATION);
 
-describe(`接続維持テスト (${PLAYER_COUNT}人)`, { timeout: 300_000 }, () => {
+describe(`接続維持テスト (${PLAYER_COUNT}人, ${MAX_DURATION}秒)`, { timeout: (MAX_DURATION + 120) * 1000 }, () => {
     let players: PlayerConn[] = [];
 
     beforeAll(async () => {

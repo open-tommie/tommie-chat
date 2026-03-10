@@ -1,20 +1,24 @@
 #!/bin/bash
 # Nakama 持続接続テスト
-# Usage: ./test/doTest-sustain.sh [-n NUM] [-h]
+# Usage: ./test/doTest-sustain.sh [-n NUM] [-t SEC] [-h]
 PLAYERS=100
+DURATION=90
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -n|--players)
             PLAYERS="$2"; shift 2 ;;
+        -t|--time)
+            DURATION="$2"; shift 2 ;;
         -h|--help)
-            echo "Usage: $0 [-n NUM]"
+            echo "Usage: $0 [-n NUM] [-t SEC]"
             echo "  -n, --players NUM  接続数 (デフォルト: 100)"
+            echo "  -t, --time SEC     テスト最大時間（秒） (デフォルト: 90)"
             echo ""
-            echo "  Nakama 持続接続テスト (N人×90秒)"
+            echo "  Nakama 持続接続テスト (N人×指定秒)"
             echo "  接続維持・リコネクト回数・移動成功率を検証"
             echo "  前提: nakama サーバが 127.0.0.1:7350 で起動していること"
             exit 0 ;;
-        *)  echo "Usage: $0 [-n NUM] (-h for help)"; exit 1 ;;
+        *)  echo "Usage: $0 [-n NUM] [-t SEC] (-h for help)"; exit 1 ;;
     esac
 done
 cd "$(dirname "$0")/.."
@@ -23,7 +27,7 @@ TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 LOGFILE="test/log/sustain-${TIMESTAMP}.md"
 
 # vitest実行（コンソール出力とJSON結果を同時に取得）
-SUSTAIN_PLAYER_COUNT=${PLAYERS} npx vitest run test/nakama-sustain.test.ts --reporter=default --reporter=json --outputFile.json=/tmp/vitest-sustain-result.json 2>&1 | tee /tmp/vitest-sustain-console.txt
+SUSTAIN_PLAYER_COUNT=${PLAYERS} SUSTAIN_DURATION=${DURATION} npx vitest run test/nakama-sustain.test.ts --reporter=default --reporter=json --outputFile.json=/tmp/vitest-sustain-result.json 2>&1 | tee /tmp/vitest-sustain-console.txt
 EXIT_CODE=${PIPESTATUS[0]}
 
 # JSONからMarkdownレポート生成
@@ -76,6 +80,7 @@ lines.push('|------|-----|');
 lines.push('| 日時 | ' + '${TIMESTAMP}'.replace(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/, '\$1/\$2/\$3 \$4:\$5:\$6') + ' |');
 lines.push('| サーバ | 127.0.0.1:7350 |');
 lines.push('| プレイヤー数 | ${PLAYERS} |');
+lines.push('| テスト時間 | ${DURATION}秒 |');
 lines.push('| 結果 | ' + (allPass ? '✅ ALL PASS' : '❌ ' + failed + ' FAILED') + ' (' + passed + '/' + total + ') |');
 lines.push('| 実行時間 | ' + duration + ' |');
 lines.push('');
@@ -84,8 +89,7 @@ lines.push('');
 lines.push('| 維持時間 | 実行時間 | ラウンド | 送信 | エラー | 成功率 | 失敗ラウンド | avg送信 | リコネクト | avg接続 |');
 lines.push('|---------:|--------:|--------:|-----:|-------:|-------:|------------:|--------:|-----------:|--------:|');
 
-const durations = ['1秒', '10秒', '30秒', '1分'];
-for (const dur of durations) {
+for (const dur of Object.keys(metrics)) {
     const d = metrics[dur];
     if (!d) continue;
     lines.push('| ' + dur + ' | ' + d.elapsed + 's | ' + d.rounds + ' | ' + d.sent + ' | ' + d.errors + ' | ' + d.successRate + '% | ' + d.failedRounds + '/' + d.totalRounds + ' | ' + d.avgSendMs + 'ms | ' + d.reconnects + ' | ' + d.avgConnected + '人 |');

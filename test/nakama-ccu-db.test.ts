@@ -134,13 +134,59 @@ describe(`同接履歴 DB永続化 [${TEST_LEVEL}]`, () => {
         }
         console.log(`[1s] ${players.length}人 接続完了`);
 
-        await sleep(3000);
-
         const { client, session } = await newAdmin();
-        const result = await rpcGetPlayerCount(client, session, '5m');
-        console.log(`[1s] 1s履歴: ${result.history.length}件, count=${result.count}`);
+
+        // サンプリングタイミングによりcountが0になる場合があるためポーリング
+        let result = { count: 0, history: [] as number[] };
+        for (let attempt = 0; attempt < 10; attempt++) {
+            await sleep(1000);
+            result = await rpcGetPlayerCount(client, session, '5m');
+            console.log(`[1s] attempt=${attempt} 1s履歴: ${result.history.length}件, count=${result.count}`);
+            if (result.count >= 1 && result.history.length > 0) break;
+        }
         expect(result.count).toBeGreaterThanOrEqual(1);
         expect(result.history.length).toBeGreaterThan(0);
+    }, 30000);
+
+    // ── 1m: 切断/再接続で同接数が正しく増減する ──
+    it('切断/再接続でcountが正しく増減する', async () => {
+        const { client, session } = await newAdmin();
+
+        // 現在のcount取得（前のテストのplayersが接続中）
+        const before = await rpcGetPlayerCount(client, session);
+        const baseCount = before.count;
+        console.log(`[reconn] ベースcount=${baseCount} (${players.length}人接続中)`);
+        expect(baseCount).toBeGreaterThanOrEqual(players.length);
+
+        // 半数を切断
+        const half = Math.floor(players.length / 2);
+        const disconnected: PlayerConn[] = [];
+        for (let i = 0; i < half; i++) {
+            players[i].socket.disconnect(true);
+            disconnected.push(players[i]);
+        }
+        console.log(`[reconn] ${half}人を切断`);
+        await sleep(2000); // 1秒サンプリングの反映を待つ
+
+        // count が減ったことを確認
+        const afterDisconnect = await rpcGetPlayerCount(client, session);
+        console.log(`[reconn] 切断後count=${afterDisconnect.count} (期待: ${baseCount - half})`);
+        expect(afterDisconnect.count).toBeLessThanOrEqual(baseCount - half + 1);
+        expect(afterDisconnect.count).toBeGreaterThanOrEqual(baseCount - half - 1);
+
+        // 切断した分を再接続
+        for (let i = 0; i < half; i++) {
+            const name = disconnected[i].name;
+            players[i] = await createPlayer(name);
+        }
+        console.log(`[reconn] ${half}人を再接続`);
+        await sleep(2000); // 1秒サンプリングの反映を待つ
+
+        // count が戻ったことを確認
+        const afterReconnect = await rpcGetPlayerCount(client, session);
+        console.log(`[reconn] 再接続後count=${afterReconnect.count} (期待: ${baseCount})`);
+        expect(afterReconnect.count).toBeGreaterThanOrEqual(baseCount - 1);
+        expect(afterReconnect.count).toBeLessThanOrEqual(baseCount + 1);
     }, 30000);
 
     // ── 1m: RPC各レンジ疎通 ──

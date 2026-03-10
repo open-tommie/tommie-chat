@@ -868,6 +868,8 @@ export function setupHtmlUI(game: GameScene): void {
                 game.nakama.sendInitPos(p.position.x, p.position.z, p.rotation.y).catch(() => {});
                 game.nakama.sendAvatarChange(game.playerTextureUrl).catch(() => {});
                 game.aoiManager.updateAOI();
+                // CCUグラフを再初期化（切断中の無効データをクリア）
+                restartCcu();
             };
             startPing();
             const ccuPanel = document.getElementById("ccu-panel");
@@ -1319,6 +1321,7 @@ export function setupHtmlUI(game: GameScene): void {
     };
     const CCU_DEFAULT_MAX  = 100;
     const ccuHistory: number[] = [];
+    let ccuNow = 0;
     let ccuTimer: ReturnType<typeof setInterval> | null = null;
     let ccuRange = "5m";
     let ccuInitialized = false;
@@ -1488,8 +1491,8 @@ export function setupHtmlUI(game: GameScene): void {
         }
 
         // 統計ボックス (now / avg / min / max) + ログイン状態
-        const latest = ccuHistory[ccuHistory.length - 1];
-        const loggedIn = ccuInitialized && latest !== undefined && latest >= 0;
+        const latest = ccuNow;
+        const loggedIn = ccuInitialized && ccuHistory.length > 0;
         const hasData = validVals.length > 0;
         const minV = hasData ? Math.min(...validVals) : undefined;
         const maxV = hasData ? Math.max(...validVals) : undefined;
@@ -1534,8 +1537,10 @@ export function setupHtmlUI(game: GameScene): void {
                 if (ccuHistory.length === 0 || ccuHistory[ccuHistory.length - 1] !== result.count) {
                     ccuHistory.push(result.count);
                 }
+                ccuNow = result.count;
             } else {
                 ccuHistory.push(result.count);
+                ccuNow = result.count;
             }
             const maxLen = getCcuConfig().max;
             if (ccuHistory.length > maxLen) ccuHistory.splice(0, ccuHistory.length - maxLen);
@@ -1548,6 +1553,7 @@ export function setupHtmlUI(game: GameScene): void {
     const stopCcu = () => {
         if (ccuTimer !== null) { clearInterval(ccuTimer); ccuTimer = null; }
         ccuHistory.length = 0;
+        ccuNow = 0;
         ccuInitialized = false;
         drawCcuGraph();
     };
