@@ -52,17 +52,13 @@ else
   echo "Warning: could not detect Nakama protobuf version, using go.mod as-is"
 fi
 
-# ビルドキャッシュボリュームの権限を修正（新規作成時は root 所有のため）
-# pluginbuilder イメージを使用（alpine の別途 pull を回避）
+# root で実行し、出力ファイルを現在のユーザーに chown する
+# (--user フラグは Docker/WSL 環境で不安定なため使用しない)
 BUILDER_IMG="registry.heroiclabs.com/heroiclabs/nakama-pluginbuilder:${NAKAMA_VERSION}"
-docker run --rm --entrypoint sh \
-  -v nakama-go-build-cache:/tmp/go-build \
-  -v nakama-go-cache:/go/pkg/mod \
-  "$BUILDER_IMG" \
-  -c "chown $(id -u):$(id -g) /tmp/go-build /go/pkg/mod" 2>/dev/null || true
+HOST_UID=$(id -u)
+HOST_GID=$(id -g)
 
 docker run --rm \
-  --user "$(id -u):$(id -g)" \
   --entrypoint sh \
   -v "$SCRIPT_DIR":/go_src \
   -v nakama-go-cache:/go/pkg/mod \
@@ -70,7 +66,7 @@ docker run --rm \
   -e GOCACHE=/tmp/go-build \
   -w /go_src \
   "$BUILDER_IMG" \
-  -c "rm -f go.sum && GONOSUMDB='*' go build -mod=mod -buildmode=plugin -trimpath -o /go_src/world.so ."
+  -c "rm -f go.sum && GONOSUMDB='*' go build -mod=mod -buildmode=plugin -trimpath -o /go_src/world.so . && chown ${HOST_UID}:${HOST_GID} /go_src/world.so"
 
 mv -f "$SCRIPT_DIR/world.so" "$OUT_DIR/world.so"
 echo "Built: $OUT_DIR/world.so"
