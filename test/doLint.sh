@@ -58,6 +58,23 @@ if [ -f nakama/docker-compose.yml ]; then
     run_check "docker-compose.yml" docker compose -f nakama/docker-compose.yml config --quiet
 fi
 
+# 6. 絶対パス検出（ホームディレクトリへの参照）
+TOTAL=$((TOTAL + 1))
+echo ""
+echo "[$TOTAL] Hardcoded absolute paths"
+ABS_HITS=$(grep -rn --include='*.sh' --include='*.ts' --include='*.js' --include='*.yml' --include='*.yaml' --include='*.json' --include='*.md' --include='*.conf' \
+    -E '~/|/home/' . \
+    --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist \
+    | grep -v 'node_modules' | grep -v '.git/' || true)
+if [ -z "$ABS_HITS" ]; then
+    PASSED=$((PASSED + 1))
+    echo "  ✅ PASS"
+else
+    FAILED=$((FAILED + 1))
+    echo "  ❌ FAIL — 以下に絶対パスが含まれています:"
+    echo "$ABS_HITS" | sed 's/^/    /'
+fi
+
 # サマリー
 echo ""
 echo "========================================"

@@ -1,8 +1,12 @@
 #!/bin/bash
 # Nakama Go プラグインを再ビルドするスクリプト
 # Nakama サーバと同じ Go バージョンでコンパイルするために、nakama-pluginbuilder イメージを使用する
-# Usage: ./doBuild.sh [--fresh|--force] [-h]
+# Usage: ./nakama/doBuild.sh [--fresh|--force] [-h]
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+GO_SRC="$SCRIPT_DIR/go_src"
+TARGET="$SCRIPT_DIR/modules/world.so"
 FORCE=0
 
 case "${1:-}" in
@@ -18,7 +22,7 @@ case "${1:-}" in
         exit 0 ;;
     --fresh)
         echo "キャッシュをクリアします..."
-        rm -f ~/24-mmo-Tommie-chat/nakama/go_src/.protobuf-version-cache
+        rm -f "$GO_SRC/.protobuf-version-cache"
         docker volume rm nakama-go-cache 2>/dev/null || true
         echo "Done"
         FORCE=1
@@ -30,9 +34,6 @@ case "${1:-}" in
     *)  echo "Usage: $0 [--fresh|--force] [-h]"; exit 1 ;;
 esac
 
-GO_SRC=~/24-mmo-Tommie-chat/nakama/go_src
-TARGET=~/24-mmo-Tommie-chat/nakama/modules/world.so
-
 # ソースが変更されていなければスキップ
 if [ "$FORCE" -eq 0 ] && [ -f "$TARGET" ]; then
     NEWER=$(find "$GO_SRC" -name '*.go' -o -name 'go.mod' -o -name 'go.sum' | xargs -I{} find {} -newer "$TARGET" 2>/dev/null)
@@ -42,4 +43,4 @@ if [ "$FORCE" -eq 0 ] && [ -f "$TARGET" ]; then
     fi
 fi
 
-cd "$GO_SRC" && bash build.sh && cd ~/24-mmo-Tommie-chat/nakama && docker compose restart nakama
+cd "$GO_SRC" && bash build.sh && cd "$SCRIPT_DIR" && docker compose restart nakama

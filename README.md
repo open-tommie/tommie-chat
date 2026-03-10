@@ -38,41 +38,51 @@ Babylon.js + Nakama で構築されたリアルタイムマルチプレイヤー
 ### 1. リポジトリのクローン
 
 ```bash
-git clone https://github.com/open-tommie/tommieChat.git
-cd tommieChat
+git clone https://github.com/open-tommie/tommie-chat.git
+cd tommie-chat
 ```
 
 ### 2. クライアント（フロントエンド）
 
 ```bash
 npm install
-npx vite
+npm run build
 ```
-
-ブラウザで http://localhost:5173 を開きます。
 
 ### 3. サーバー（Nakama）
 
 ```bash
-cd nakama
-
 # 環境変数の設定
-cp .env.example .env
-
-# Go プラグインのビルド
-cd go_src && bash build.sh && cd ..
+cp nakama/.env.example nakama/.env
 
 # サーバー起動
-docker compose up -d
+cd nakama && docker compose up -d && cd ..
+
+# Go プラグインのビルド＆反映
+bash nakama/doBuild.sh --fresh
 ```
 
-### 4. 本番ビルド
+### 4. ブラウザで確認
+
+<http://localhost> を開きます（nginx 経由で `dist/` を配信）。
+
+開発中は `npm run dev` で Vite 開発サーバー (<http://localhost:5173>) も使えます。
+
+### 5. テスト
 
 ```bash
-npm run build
-```
+# 型チェック
+npm run check
 
-`dist/` にビルド成果物が出力されます。
+# ユニットテスト
+npm test
+
+# 統合テスト（Nakamaサーバー起動中に実行）
+bash test/doAll.sh
+
+# 全ファイル文法チェック
+bash test/doLint.sh
+```
 
 ## ポート番号
 
